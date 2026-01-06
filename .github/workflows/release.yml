@@ -1,0 +1,79 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller wxPython numpy soundcard shazamio aiohttp_retry
+
+      - name: Fetch ffmpeg (for shaqfilegui)
+        run: python shaq/fetch_ffmpeg_windows.py
+
+      - name: Build shaqgui.exe
+        run: |
+          cd shaq
+          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build_alt shaqgui.spec
+
+      - name: Build shaqfilegui.exe
+        run: |
+          cd shaq
+          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build_alt shaqfilegui.spec
+
+      - name: Build shaqcast.exe
+        run: |
+          cd shaqcast
+          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build_alt shaqcast.spec
+
+      - name: Prepare assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp shaq/dist/shaqgui.exe release-assets/
+          cp shaq/dist/shaqfilegui.exe release-assets/
+          cp shaqcast/dist/shaqcast.exe release-assets/
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          assets = [
+              Path("release-assets/shaqgui.exe"),
+              Path("release-assets/shaqfilegui.exe"),
+              Path("release-assets/shaqcast.exe"),
+          ]
+          lines = []
+          for path in assets:
+              h = hashlib.sha256()
+              with path.open("rb") as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                      h.update(chunk)
+              lines.append(f"{h.hexdigest()}  {path.name}")
+          Path("release-assets/SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Publish GitHub Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/shaqgui.exe
+            release-assets/shaqfilegui.exe
+            release-assets/shaqcast.exe
+            release-assets/SHA256SUMS.txt
+          generate_release_notes: true
