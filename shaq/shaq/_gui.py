@@ -14,6 +14,7 @@ from queue import Empty, Queue
 from tempfile import NamedTemporaryFile
 from typing import Any
 
+from shaq._i18n import I18n, UI_LANGUAGE_CHOICES, ui_language_from_config
 from shaq._file_scan import slice_wav_bytes
 from shaq._shazam_regions import (
     SUPPORTED_ENDPOINT_COUNTRIES,
@@ -43,6 +44,148 @@ _DEFAULT_SHAZAM_LANGUAGE = os.environ.get("SHAQGUI_SHAZAM_LANGUAGE", "en-US").st
 _DEFAULT_SHAZAM_COUNTRY = os.environ.get("SHAQGUI_SHAZAM_COUNTRY", "US").strip() or "US"
 
 _CONFIG_VERSION = 1
+
+_STRINGS: dict[str, dict[str, str]] = {
+    "crash.unable_start": {
+        "pl": "Nie mogę uruchomić aplikacji.",
+        "en": "Unable to start the app.",
+    },
+    "crash.details_saved": {
+        "pl": "Szczegóły zapisano w:\n{path}",
+        "en": "Details were saved to:\n{path}",
+    },
+    "crash.vc_redist": {
+        "pl": "Jeśli to świeża maszyna, doinstaluj: Microsoft Visual C++ Redistributable 2015–2022 (x64).",
+        "en": "If this is a fresh machine, install: Microsoft Visual C++ Redistributable 2015–2022 (x64).",
+    },
+    "error.load_soundcard": {
+        "pl": "Nie mogę załadować audio (soundcard): {error}",
+        "en": "Unable to load audio (soundcard): {error}",
+    },
+    "error.load_shazamio": {
+        "pl": "Nie mogę załadować shazamio: {error}",
+        "en": "Unable to load shazamio: {error}",
+    },
+    "status.ready": {"pl": "Gotowe.", "en": "Ready."},
+    "status.starting": {"pl": "Start...", "en": "Starting..."},
+    "status.stopping": {"pl": "Zatrzymywanie...", "en": "Stopping..."},
+    "status.listening": {"pl": "Nasłuchuję...", "en": "Listening..."},
+    "status.recognizing": {"pl": "Rozpoznaję...", "en": "Recognizing..."},
+    "status.recognizing_multi": {
+        "pl": "Rozpoznaję ({current}/{total})...",
+        "en": "Recognizing ({current}/{total})...",
+    },
+    "status.recognition_failed_backoff": {
+        "pl": "Rozpoznawanie nieudane, pauza {seconds}s{detail}",
+        "en": "Recognition failed, pausing {seconds}s{detail}",
+    },
+    "status.saved": {"pl": "Zapisano rozpoznanie.", "en": "Saved recognition."},
+    "status.stopped": {"pl": "Zatrzymano.", "en": "Stopped."},
+    "status.error": {"pl": "Błąd.", "en": "Error."},
+    "error.list_audio_devices": {
+        "pl": "Nie mogę pobrać listy urządzeń audio: {error}",
+        "en": "Couldn't get list of audio devices: {error}",
+    },
+    "error.no_input_devices": {
+        "pl": "Nie znaleziono żadnych urządzeń wejściowych (mikrofonów).",
+        "en": "No input devices (microphones) found.",
+    },
+    "error.no_output_devices": {
+        "pl": "Nie znaleziono żadnych urządzeń wyjściowych.",
+        "en": "No output devices found.",
+    },
+    "error.no_audio_devices": {
+        "pl": "Nie znaleziono żadnych urządzeń audio (wejście/wyjście).",
+        "en": "No audio devices found (input/output).",
+    },
+    "error.no_device_selected": {
+        "pl": "Nie wybrano urządzenia audio.",
+        "en": "No audio device selected.",
+    },
+    "error.choose_output_file": {"pl": "Wybierz plik zapisu.", "en": "Select an output file."},
+    "error.write_file": {"pl": "Nie mogę zapisać do pliku: {error}", "en": "Can't write to file: {error}"},
+    "label.ui_language": {"pl": "Język interfejsu:", "en": "Interface language:"},
+    "name.ui_language": {"pl": "Język interfejsu", "en": "Interface language"},
+    "tooltip.ui_language": {
+        "pl": "Zmień język interfejsu (wymaga restartu aplikacji).",
+        "en": "Change the interface language (requires app restart).",
+    },
+    "info.restart_required": {
+        "pl": "Zapisano język. Uruchom ponownie aplikację, aby zastosować zmianę.",
+        "en": "Language saved. Restart the app to apply the change.",
+    },
+    "label.audio_source": {"pl": "Źródło audio:", "en": "Audio source:"},
+    "choice.audio_source.output": {"pl": "Wyjście (loopback)", "en": "Output (loopback)"},
+    "choice.audio_source.input": {"pl": "Wejście (mikrofon)", "en": "Input (microphone)"},
+    "name.audio_source": {"pl": "Źródło audio", "en": "Audio source"},
+    "label.device": {"pl": "Urządzenie:", "en": "Device:"},
+    "name.device": {"pl": "Urządzenie audio", "en": "Audio device"},
+    "label.shazam_language": {"pl": "Język Shazam:", "en": "Shazam language:"},
+    "name.shazam_language": {"pl": "Język Shazam", "en": "Shazam language"},
+    "help.shazam_language": {
+        "pl": "Wybierz język (locale) używany przez Shazam.",
+        "en": "Select the language (locale) used by Shazam.",
+    },
+    "label.shazam_country": {"pl": "Kraj Shazam:", "en": "Shazam country:"},
+    "name.shazam_country": {"pl": "Kraj Shazam", "en": "Shazam country"},
+    "help.shazam_country": {
+        "pl": "Wybierz kraj (endpoint_country) używany przez Shazam.",
+        "en": "Select the country (endpoint_country) used by Shazam.",
+    },
+    "label.output_file": {"pl": "Plik zapisu:", "en": "Output file:"},
+    "name.output_file": {"pl": "Plik zapisu", "en": "Output file"},
+    "button.browse": {"pl": "Wybierz...", "en": "Browse..."},
+    "tooltip.browse": {
+        "pl": "Wybierz plik, do którego będą zapisywane rozpoznania.",
+        "en": "Choose the file where recognitions will be written.",
+    },
+    "name.saved_recognitions": {"pl": "Zapisane rozpoznania", "en": "Saved recognitions"},
+    "label.saved_unique": {
+        "pl": "Zapisane rozpoznania (unikalne):",
+        "en": "Saved recognitions (unique):",
+    },
+    "button.advanced": {"pl": "Ustawienia zaawansowane…", "en": "Advanced settings..."},
+    "tooltip.advanced": {
+        "pl": "Zmień parametry wpływające na dokładność/limity API.",
+        "en": "Change parameters affecting accuracy / API limits.",
+    },
+    "button.start": {"pl": "Start", "en": "Start"},
+    "tooltip.start": {"pl": "Rozpocznij rozpoznawanie (Start).", "en": "Start recognition."},
+    "button.stop": {"pl": "Stop", "en": "Stop"},
+    "tooltip.stop": {"pl": "Zatrzymaj rozpoznawanie (Stop).", "en": "Stop recognition."},
+    "status.config_save_failed": {
+        "pl": "Nie udało się zapisać config: {error}",
+        "en": "Failed to save config: {error}",
+    },
+    "dialog.advanced.title": {"pl": "Ustawienia zaawansowane", "en": "Advanced settings"},
+    "adv.sample_seconds": {"pl": "Długość próbki (sek):", "en": "Sample length (sec):"},
+    "name.sample_seconds": {"pl": "Długość próbki (sekundy)", "en": "Sample length (seconds)"},
+    "adv.segment_seconds": {"pl": "Długość podpisu (sek):", "en": "Signature length (sec):"},
+    "name.segment_seconds": {"pl": "Długość podpisu (sekundy)", "en": "Signature length (seconds)"},
+    "adv.max_windows": {"pl": "Okna w próbce (max):", "en": "Windows per sample (max):"},
+    "name.max_windows": {"pl": "Okna w próbce", "en": "Windows per sample"},
+    "tooltip.max_windows": {
+        "pl": "Ile prób (okien) w ramach jednej próbki audio.",
+        "en": "How many tries (windows) within a single audio sample.",
+    },
+    "adv.window_step": {"pl": "Krok okna (sek):", "en": "Window step (sec):"},
+    "name.window_step": {"pl": "Krok okna (sekundy)", "en": "Window step (seconds)"},
+    "adv.silence_dbfs": {"pl": "Próg ciszy (dBFS):", "en": "Silence threshold (dBFS):"},
+    "name.silence_dbfs": {"pl": "Próg ciszy (dBFS)", "en": "Silence threshold (dBFS)"},
+    "tooltip.silence_dbfs": {
+        "pl": "Jeśli najlepsze okno ma RMS poniżej progu, próbka nie jest wysyłana.",
+        "en": "If the best window RMS is below this threshold, the sample isn't sent.",
+    },
+    "adv.error.segment_gt_sample": {
+        "pl": "Długość podpisu nie może być większa niż długość próbki.",
+        "en": "Signature length can't be greater than sample length.",
+    },
+    "adv.error.invalid_silence": {
+        "pl": "Nieprawidłowy próg ciszy (dBFS).",
+        "en": "Invalid silence threshold (dBFS).",
+    },
+    "file_dialog.choose_output": {"pl": "Wybierz plik zapisu", "en": "Select output file"},
+}
 
 
 def _config_path() -> Path:
@@ -339,16 +482,17 @@ def _default_output_file() -> Path:
 
 
 def main() -> None:
+    t = I18n(ui_language_from_config(_load_config().get("ui_language")), _STRINGS).t
     try:
         _main()
     except Exception:
         trace = traceback.format_exc()
         log_path = _write_crash_log(trace)
 
-        msg = "Nie mogę uruchomić aplikacji."
+        msg = t("crash.unable_start")
         if log_path is not None:
-            msg += f"\n\nSzczegóły zapisano w:\n{log_path}"
-        msg += "\n\nJeśli to świeża maszyna, doinstaluj: Microsoft Visual C++ Redistributable 2015–2022 (x64)."
+            msg += "\n\n" + t("crash.details_saved", path=str(log_path))
+        msg += "\n\n" + t("crash.vc_redist")
 
         _win_error_dialog(msg)
 
@@ -372,6 +516,9 @@ def _main() -> None:
 
     app = wx.App(False)
     config = _load_config()
+    ui_language = ui_language_from_config(config.get("ui_language"))
+    i18n = I18n(ui_language, _STRINGS)
+    t = i18n.t
 
     class MainFrame(wx.Frame):
         def __init__(self) -> None:
@@ -380,7 +527,7 @@ def _main() -> None:
 
             panel = wx.Panel(self)
             self.CreateStatusBar()
-            self.SetStatusText("Gotowe.")
+            self.SetStatusText(t("status.ready"))
 
             try:
                 self._speakers = [_AudioDevice(s.name, s.id, "output") for s in sc.all_speakers()]
@@ -389,7 +536,7 @@ def _main() -> None:
                 ]
             except Exception as exc:
                 wx.MessageBox(
-                    f"Nie mogę pobrać listy urządzeń audio: {exc}",
+                    t("error.list_audio_devices", error=str(exc)),
                     _APP_NAME,
                     wx.OK | wx.ICON_ERROR,
                     self,
@@ -443,9 +590,26 @@ def _main() -> None:
                 silence_dbfs_threshold=silence_dbfs,
             )
 
-            source_label = wx.StaticText(panel, label="Źródło audio:")
-            self.source_choice = wx.Choice(panel, choices=["Wyjście (loopback)", "Wejście (mikrofon)"])
-            self.source_choice.SetName("Źródło audio")
+            self._ui_language_codes = [code for code, _label in UI_LANGUAGE_CHOICES]
+            self.ui_language_choice = wx.Choice(
+                panel, choices=[label for _code, label in UI_LANGUAGE_CHOICES]
+            )
+            self.ui_language_choice.SetName(t("name.ui_language"))
+            self.ui_language_choice.SetToolTip(t("tooltip.ui_language"))
+            self.ui_language_choice.SetSelection(0 if ui_language == "pl" else 1)
+            self.ui_language_choice.Bind(wx.EVT_CHOICE, self._on_ui_language_changed)
+
+            ui_lang_label = wx.StaticText(panel, label=t("label.ui_language"))
+
+            source_label = wx.StaticText(panel, label=t("label.audio_source"))
+            self.source_choice = wx.Choice(
+                panel,
+                choices=[
+                    t("choice.audio_source.output"),
+                    t("choice.audio_source.input"),
+                ],
+            )
+            self.source_choice.SetName(t("name.audio_source"))
             self.source_choice.Bind(wx.EVT_CHOICE, self._on_source_changed)
             source_cfg = str(config.get("source") or "").strip().lower()
             if source_cfg in {"input", "mic", "microphone"}:
@@ -453,56 +617,59 @@ def _main() -> None:
             else:
                 self.source_choice.SetSelection(0)
 
-            device_label = wx.StaticText(panel, label="Urządzenie:")
+            device_label = wx.StaticText(panel, label=t("label.device"))
             self.device_choice = wx.Choice(panel, choices=[])
-            self.device_choice.SetName("Urządzenie audio")
+            self.device_choice.SetName(t("name.device"))
             self.device_choice.Bind(wx.EVT_CHOICE, self._on_device_changed)
             self._devices: list[_AudioDevice] = []
             self._populate_devices()
 
-            language_label = wx.StaticText(panel, label="Język Shazam:")
+            language_label = wx.StaticText(panel, label=t("label.shazam_language"))
             self._language_codes = language_codes()
             self.language_choice = wx.Choice(panel, choices=language_choice_strings())
-            self.language_choice.SetName("Język Shazam")
-            self.language_choice.SetHelpText("Wybierz język (locale) używany przez Shazam.")
+            self.language_choice.SetName(t("name.shazam_language"))
+            self.language_choice.SetHelpText(t("help.shazam_language"))
             cfg_language = str(config.get("language") or "").strip() or _DEFAULT_SHAZAM_LANGUAGE
             language_idx = find_index_by_code(SUPPORTED_LANGUAGES, cfg_language)
             self.language_choice.SetSelection(language_idx if language_idx is not None else 0)
 
-            country_label = wx.StaticText(panel, label="Kraj Shazam:")
+            country_label = wx.StaticText(panel, label=t("label.shazam_country"))
             self._country_codes = country_codes()
             self.country_choice = wx.Choice(panel, choices=country_choice_strings())
-            self.country_choice.SetName("Kraj Shazam")
-            self.country_choice.SetHelpText("Wybierz kraj (endpoint_country) używany przez Shazam.")
+            self.country_choice.SetName(t("name.shazam_country"))
+            self.country_choice.SetHelpText(t("help.shazam_country"))
             cfg_country = str(config.get("endpoint_country") or "").strip() or _DEFAULT_SHAZAM_COUNTRY
             country_idx = find_index_by_code(SUPPORTED_ENDPOINT_COUNTRIES, cfg_country)
             self.country_choice.SetSelection(country_idx if country_idx is not None else 0)
 
-            out_label = wx.StaticText(panel, label="Plik zapisu:")
+            out_label = wx.StaticText(panel, label=t("label.output_file"))
             cfg_out = str(config.get("output_path") or "").strip()
             self.out_path = wx.TextCtrl(panel, value=cfg_out or str(_default_output_file()))
-            self.out_path.SetName("Plik zapisu")
-            self.browse_btn = wx.Button(panel, label="Wybierz...")
-            self.browse_btn.SetToolTip("Wybierz plik, do którego będą zapisywane rozpoznania.")
+            self.out_path.SetName(t("name.output_file"))
+            self.browse_btn = wx.Button(panel, label=t("button.browse"))
+            self.browse_btn.SetToolTip(t("tooltip.browse"))
             self.browse_btn.Bind(wx.EVT_BUTTON, self._on_browse)
 
             self.log_list = wx.ListBox(panel)
-            self.log_list.SetName("Zapisane rozpoznania")
+            self.log_list.SetName(t("name.saved_recognitions"))
 
-            self.advanced_btn = wx.Button(panel, label="Ustawienia zaawansowane…")
-            self.advanced_btn.SetToolTip("Zmień parametry wpływające na dokładność/limity API.")
+            self.advanced_btn = wx.Button(panel, label=t("button.advanced"))
+            self.advanced_btn.SetToolTip(t("tooltip.advanced"))
             self.advanced_btn.Bind(wx.EVT_BUTTON, self._on_advanced)
 
-            self.start_btn = wx.Button(panel, label="Start")
-            self.start_btn.SetToolTip("Rozpocznij rozpoznawanie (Start).")
+            self.start_btn = wx.Button(panel, label=t("button.start"))
+            self.start_btn.SetToolTip(t("tooltip.start"))
             self.start_btn.Bind(wx.EVT_BUTTON, self._on_start)
-            self.stop_btn = wx.Button(panel, label="Stop")
-            self.stop_btn.SetToolTip("Zatrzymaj rozpoznawanie (Stop).")
+            self.stop_btn = wx.Button(panel, label=t("button.stop"))
+            self.stop_btn.SetToolTip(t("tooltip.stop"))
             self.stop_btn.Bind(wx.EVT_BUTTON, self._on_stop)
             self.stop_btn.Disable()
 
-            grid = wx.FlexGridSizer(rows=5, cols=3, vgap=8, hgap=8)
+            grid = wx.FlexGridSizer(rows=6, cols=3, vgap=8, hgap=8)
             grid.AddGrowableCol(1, 1)
+            grid.Add(ui_lang_label, 0, wx.ALIGN_CENTER_VERTICAL)
+            grid.Add(self.ui_language_choice, 0)
+            grid.Add((1, 1))
             grid.Add(source_label, 0, wx.ALIGN_CENTER_VERTICAL)
             grid.Add(self.source_choice, 1, wx.EXPAND)
             grid.Add((1, 1))
@@ -528,7 +695,7 @@ def _main() -> None:
             layout = wx.BoxSizer(wx.VERTICAL)
             layout.Add(grid, 0, wx.EXPAND | wx.ALL, 12)
             layout.Add(
-                wx.StaticText(panel, label="Zapisane rozpoznania (unikalne):"),
+                wx.StaticText(panel, label=t("label.saved_unique")),
                 0,
                 wx.LEFT | wx.RIGHT,
                 12,
@@ -546,6 +713,7 @@ def _main() -> None:
         def _set_running(self, running: bool) -> None:
             self.start_btn.Enable(not running)
             self.stop_btn.Enable(running)
+            self.ui_language_choice.Enable(not running)
             self.source_choice.Enable(not running)
             self.device_choice.Enable(not running)
             self.language_choice.Enable(not running)
@@ -566,10 +734,10 @@ def _main() -> None:
 
             if source_idx == 1:
                 candidates = list(self._microphones)
-                empty_message = "Nie znaleziono żadnych urządzeń wejściowych (mikrofonów)."
+                empty_message = t("error.no_input_devices")
             else:
                 candidates = list(self._speakers)
-                empty_message = "Nie znaleziono żadnych urządzeń wyjściowych."
+                empty_message = t("error.no_output_devices")
 
             self._devices.extend(candidates)
             preferred_id = self._device_id_input if source_idx == 1 else self._device_id_output
@@ -590,8 +758,12 @@ def _main() -> None:
         def _selected_device(self) -> _AudioDevice:
             idx = self.device_choice.GetSelection()
             if idx == wx.NOT_FOUND or idx >= len(self._devices):
-                raise RuntimeError("Nie wybrano urządzenia audio.")
+                raise RuntimeError(t("error.no_device_selected"))
             return self._devices[idx]
+
+        def _on_ui_language_changed(self, _event: wx.CommandEvent) -> None:
+            self._persist_config()
+            wx.MessageBox(t("info.restart_required"), _APP_NAME, wx.OK | wx.ICON_INFORMATION, self)
 
         def _on_source_changed(self, _event: wx.CommandEvent) -> None:
             self._populate_devices()
@@ -607,6 +779,11 @@ def _main() -> None:
                 self._device_id_output = device.id
 
         def _collect_config(self) -> dict[str, Any]:
+            ui_language_value = ui_language
+            ui_idx = self.ui_language_choice.GetSelection()
+            if ui_idx != wx.NOT_FOUND and ui_idx < len(self._ui_language_codes):
+                ui_language_value = self._ui_language_codes[ui_idx]
+
             language = _DEFAULT_SHAZAM_LANGUAGE
             lang_idx = self.language_choice.GetSelection()
             if lang_idx != wx.NOT_FOUND and lang_idx < len(self._language_codes):
@@ -629,6 +806,7 @@ def _main() -> None:
 
             return {
                 "version": _CONFIG_VERSION,
+                "ui_language": ui_language_value,
                 "output_path": self.out_path.GetValue(),
                 "source": source,
                 "device_id_output": self._device_id_output,
@@ -648,7 +826,7 @@ def _main() -> None:
             try:
                 _save_config(self._collect_config())
             except Exception as exc:
-                self.SetStatusText(f"Nie udało się zapisać config: {exc}")
+                self.SetStatusText(t("status.config_save_failed", error=str(exc)))
 
         def _on_advanced(self, _event: wx.CommandEvent) -> None:
             focus_before = wx.Window.FindFocus()
@@ -689,36 +867,36 @@ def _main() -> None:
 
             dialog = wx.Dialog(
                 self,
-                title="Ustawienia zaawansowane",
+                title=t("dialog.advanced.title"),
                 style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
             )
             dialog.SetMinClientSize((560, 320))
 
             panel = wx.Panel(dialog)
 
-            sample_label = wx.StaticText(panel, label="Długość próbki (sek):")
+            sample_label = wx.StaticText(panel, label=t("adv.sample_seconds"))
             sample = wx.SpinCtrl(panel, min=5, max=60, initial=int(self._advanced.sample_seconds))
-            sample.SetName("Długość próbki (sekundy)")
+            sample.SetName(t("name.sample_seconds"))
 
-            segment_label = wx.StaticText(panel, label="Długość podpisu (sek):")
+            segment_label = wx.StaticText(panel, label=t("adv.segment_seconds"))
             segment = wx.SpinCtrl(panel, min=5, max=60, initial=int(self._advanced.segment_seconds))
-            segment.SetName("Długość podpisu (sekundy)")
+            segment.SetName(t("name.segment_seconds"))
 
-            windows_label = wx.StaticText(panel, label="Okna w próbce (max):")
+            windows_label = wx.StaticText(panel, label=t("adv.max_windows"))
             windows = wx.SpinCtrl(
                 panel, min=1, max=6, initial=int(self._advanced.max_windows_per_sample)
             )
-            windows.SetName("Okna w próbce")
-            windows.SetToolTip("Ile prób (okien) w ramach jednej próbki audio.")
+            windows.SetName(t("name.max_windows"))
+            windows.SetToolTip(t("tooltip.max_windows"))
 
-            step_label = wx.StaticText(panel, label="Krok okna (sek):")
+            step_label = wx.StaticText(panel, label=t("adv.window_step"))
             step = wx.SpinCtrl(panel, min=1, max=60, initial=int(self._advanced.window_step_seconds))
-            step.SetName("Krok okna (sekundy)")
+            step.SetName(t("name.window_step"))
 
-            silence_label = wx.StaticText(panel, label="Próg ciszy (dBFS):")
+            silence_label = wx.StaticText(panel, label=t("adv.silence_dbfs"))
             silence = wx.TextCtrl(panel, value=str(self._advanced.silence_dbfs_threshold))
-            silence.SetName("Próg ciszy (dBFS)")
-            silence.SetToolTip("Jeśli najlepsze okno ma RMS poniżej progu, próbka nie jest wysyłana.")
+            silence.SetName(t("name.silence_dbfs"))
+            silence.SetToolTip(t("tooltip.silence_dbfs"))
 
             grid = wx.FlexGridSizer(cols=2, vgap=8, hgap=8)
             grid.AddGrowableCol(1, 1)
@@ -759,7 +937,7 @@ def _main() -> None:
                 segment_seconds = int(segment.GetValue())
                 if segment_seconds > sample_seconds:
                     wx.MessageBox(
-                        "Długość podpisu nie może być większa niż długość próbki.",
+                        t("adv.error.segment_gt_sample"),
                         _APP_NAME,
                         wx.OK | wx.ICON_ERROR,
                         dialog,
@@ -770,7 +948,7 @@ def _main() -> None:
                     silence_dbfs = float(silence.GetValue().strip().replace(",", "."))
                 except ValueError:
                     wx.MessageBox(
-                        "Nieprawidłowy próg ciszy (dBFS).",
+                        t("adv.error.invalid_silence"),
                         _APP_NAME,
                         wx.OK | wx.ICON_ERROR,
                         dialog,
@@ -799,7 +977,7 @@ def _main() -> None:
         def _on_browse(self, _event: wx.CommandEvent) -> None:
             with wx.FileDialog(
                 self,
-                message="Wybierz plik zapisu",
+                message=t("file_dialog.choose_output"),
                 defaultDir=str(Path(self.out_path.GetValue()).expanduser().parent),
                 defaultFile=str(Path(self.out_path.GetValue()).name),
                 wildcard="Text files (*.txt)|*.txt|All files (*.*)|*.*",
@@ -816,7 +994,7 @@ def _main() -> None:
             if not self._speakers:
                 if not self._microphones:
                     wx.MessageBox(
-                        "Nie znaleziono żadnych urządzeń audio (wejście/wyjście).",
+                        t("error.no_audio_devices"),
                         _APP_NAME,
                         wx.OK | wx.ICON_ERROR,
                         self,
@@ -825,7 +1003,7 @@ def _main() -> None:
 
             out_path = Path(self.out_path.GetValue()).expanduser()
             if not str(out_path).strip():
-                wx.MessageBox("Wybierz plik zapisu.", _APP_NAME, wx.OK | wx.ICON_ERROR, self)
+                wx.MessageBox(t("error.choose_output_file"), _APP_NAME, wx.OK | wx.ICON_ERROR, self)
                 return
 
             try:
@@ -851,7 +1029,7 @@ def _main() -> None:
 
             self._stop_event.clear()
             self._set_running(True)
-            self.SetStatusText("Start...")
+            self.SetStatusText(t("status.starting"))
 
             self._persist_config()
 
@@ -864,7 +1042,7 @@ def _main() -> None:
 
         def _on_stop(self, _event: wx.CommandEvent) -> None:
             self._stop_event.set()
-            self.SetStatusText("Zatrzymywanie...")
+            self.SetStatusText(t("status.stopping"))
 
         def _worker_main(
             self,
@@ -887,7 +1065,7 @@ def _main() -> None:
 
             try:
                 while not self._stop_event.is_set():
-                    self._events.put(("status", "Nasłuchuję..."))
+                    self._events.put(("status", t("status.listening")))
                     audio = _record_wav(
                         sc,
                         device.id,
@@ -926,10 +1104,17 @@ def _main() -> None:
 
                         if len(window_starts) > 1:
                             self._events.put(
-                                ("status", f"Rozpoznaję ({idx}/{len(window_starts)})...")
+                                (
+                                    "status",
+                                    t(
+                                        "status.recognizing_multi",
+                                        current=idx,
+                                        total=len(window_starts),
+                                    ),
+                                )
                             )
                         else:
-                            self._events.put(("status", "Rozpoznaję..."))
+                            self._events.put(("status", t("status.recognizing")))
 
                         try:
                             raw = loop.run_until_complete(shazam.recognize(window_audio))  # type: ignore[arg-type]
@@ -965,7 +1150,11 @@ def _main() -> None:
                         self._events.put(
                             (
                                 "status",
-                                f"Rozpoznawanie nieudane, pauza {int(backoff_s)}s{detail}",
+                                t(
+                                    "status.recognition_failed_backoff",
+                                    seconds=int(backoff_s),
+                                    detail=detail,
+                                ),
                             )
                         )
                         self._stop_event.wait(backoff_s)
@@ -985,13 +1174,13 @@ def _main() -> None:
                     try:
                         if writer.append_unique(line):
                             self._events.put(("track", line))
-                            self._events.put(("status", "Zapisano rozpoznanie."))
+                            self._events.put(("status", t("status.saved")))
                     except OSError as exc:
-                        self._events.put(("error", f"Nie mogę zapisać do pliku: {exc}"))
+                        self._events.put(("error", t("error.write_file", error=str(exc))))
             except Exception as exc:
                 self._events.put(("error", str(exc)))
             finally:
-                self._events.put(("stopped", "Zatrzymano."))
+                self._events.put(("stopped", t("status.stopped")))
 
         def _on_timer(self, _event: wx.TimerEvent) -> None:
             while True:
@@ -1005,7 +1194,7 @@ def _main() -> None:
                 elif kind == "track":
                     self.log_list.Append(payload)
                 elif kind == "error":
-                    self.SetStatusText("Błąd.")
+                    self.SetStatusText(t("status.error"))
                     wx.MessageBox(payload, _APP_NAME, wx.OK | wx.ICON_ERROR, self)
                     self._stop_event.set()
                 elif kind == "stopped":

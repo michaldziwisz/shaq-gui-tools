@@ -21,6 +21,7 @@ import wave
 warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*audioop.*deprecated.*")
 import audioop
 
+from shaq._i18n import I18n, UI_LANGUAGE_CHOICES, ui_language_from_config
 from shaq._file_scan import (
     FfmpegNotFoundError,
     extract_wav_segment,
@@ -81,6 +82,234 @@ _SUPPORTED_SUFFIXES = {
     ".opus",
     ".ts",
     ".wav",
+}
+
+_STRINGS: dict[str, dict[str, str]] = {
+    "crash.unable_start": {"pl": "Nie mogę uruchomić aplikacji.", "en": "Unable to start the app."},
+    "crash.details_saved": {
+        "pl": "Szczegóły zapisano w:\n{path}",
+        "en": "Details were saved to:\n{path}",
+    },
+    "crash.vc_redist": {
+        "pl": "Jeśli to świeża maszyna, doinstaluj: Microsoft Visual C++ Redistributable 2015–2022 (x64).",
+        "en": "If this is a fresh machine, install: Microsoft Visual C++ Redistributable 2015–2022 (x64).",
+    },
+    "error.load_shazamio": {
+        "pl": "Nie mogę załadować shazamio: {error}",
+        "en": "Unable to load shazamio: {error}",
+    },
+    "status.ready": {"pl": "Gotowe.", "en": "Ready."},
+    "status.starting": {"pl": "Start...", "en": "Starting..."},
+    "status.stopping": {"pl": "Zatrzymywanie...", "en": "Stopping..."},
+    "status.stopped": {"pl": "Zatrzymano.", "en": "Stopped."},
+    "status.done": {"pl": "Zakończono.", "en": "Done."},
+    "status.error": {"pl": "Błąd.", "en": "Error."},
+    "status.config_save_failed": {
+        "pl": "Nie udało się zapisać config: {error}",
+        "en": "Failed to save config: {error}",
+    },
+    "label.ui_language": {"pl": "Język interfejsu:", "en": "Interface language:"},
+    "name.ui_language": {"pl": "Język interfejsu", "en": "Interface language"},
+    "tooltip.ui_language": {
+        "pl": "Zmień język interfejsu (wymaga restartu aplikacji).",
+        "en": "Change the interface language (requires app restart).",
+    },
+    "info.restart_required": {
+        "pl": "Zapisano język. Uruchom ponownie aplikację, aby zastosować zmianę.",
+        "en": "Language saved. Restart the app to apply the change.",
+    },
+    "label.files_to_scan": {"pl": "Pliki do skanowania:", "en": "Files to scan:"},
+    "name.files_to_scan": {"pl": "Pliki do skanowania", "en": "Files to scan"},
+    "button.add_files": {"pl": "Dodaj pliki...", "en": "Add files..."},
+    "tooltip.add_files": {"pl": "Dodaj jeden lub wiele plików audio.", "en": "Add one or more audio files."},
+    "button.add_folder": {"pl": "Dodaj folder...", "en": "Add folder..."},
+    "tooltip.add_folder": {
+        "pl": "Dodaj wszystkie wspierane pliki z folderu.",
+        "en": "Add all supported files from a folder.",
+    },
+    "button.remove_selected": {"pl": "Usuń zaznaczone", "en": "Remove selected"},
+    "tooltip.remove_selected": {
+        "pl": "Usuń zaznaczone pliki z listy.",
+        "en": "Remove selected files from the list.",
+    },
+    "button.clear_list": {"pl": "Wyczyść listę", "en": "Clear list"},
+    "tooltip.clear_list": {"pl": "Usuń wszystkie pliki z listy.", "en": "Remove all files from the list."},
+    "label.output_folder_optional": {
+        "pl": "Folder zapisu (opcjonalnie):",
+        "en": "Output folder (optional):",
+    },
+    "name.output_folder": {"pl": "Folder zapisu", "en": "Output folder"},
+    "button.browse": {"pl": "Wybierz...", "en": "Browse..."},
+    "tooltip.output_folder_browse": {
+        "pl": "Wybierz folder, w którym powstanie plik .txt; jeśli puste, zapis obok źródła.",
+        "en": "Choose the folder where the .txt file will be created; if empty, it is written next to the source.",
+    },
+    "label.interval_seconds": {"pl": "Próbka co (sek):", "en": "Sample every (sec):"},
+    "name.interval_seconds": {"pl": "Próbka co (sekundy)", "en": "Sample every (seconds)"},
+    "label.shazam_language": {"pl": "Język Shazam:", "en": "Shazam language:"},
+    "name.shazam_language": {"pl": "Język Shazam", "en": "Shazam language"},
+    "tooltip.shazam_language": {
+        "pl": "Język (locale) używany przez Shazam API.",
+        "en": "Language (locale) used by the Shazam API.",
+    },
+    "label.shazam_country": {"pl": "Kraj Shazam:", "en": "Shazam country:"},
+    "name.shazam_country": {"pl": "Kraj Shazam", "en": "Shazam country"},
+    "tooltip.shazam_country": {
+        "pl": "Kraj (endpoint_country) używany przez Shazam API.",
+        "en": "Country (endpoint_country) used by the Shazam API.",
+    },
+    "name.progress": {"pl": "Postęp", "en": "Progress"},
+    "label.progress_initial": {"pl": "Postęp: 0%", "en": "Progress: 0%"},
+    "name.progress_text": {"pl": "Postęp (tekst)", "en": "Progress (text)"},
+    "name.scan_results": {"pl": "Wyniki skanowania", "en": "Scan results"},
+    "button.scan": {"pl": "Skanuj", "en": "Scan"},
+    "tooltip.scan": {"pl": "Rozpocznij skanowanie wybranych plików.", "en": "Start scanning the selected files."},
+    "button.stop": {"pl": "Stop", "en": "Stop"},
+    "tooltip.stop": {"pl": "Zatrzymaj skanowanie.", "en": "Stop scanning."},
+    "button.advanced": {"pl": "Ustawienia zaawansowane…", "en": "Advanced settings..."},
+    "tooltip.advanced": {
+        "pl": "Parametry wpływające na dokładność/limity API.",
+        "en": "Parameters affecting accuracy / API limits.",
+    },
+    "label.results": {"pl": "Wyniki:", "en": "Results:"},
+    "status.files_selected": {"pl": "Wybrano plików: {count}", "en": "Files selected: {count}"},
+    "file_dialog.add_files": {"pl": "Dodaj pliki audio", "en": "Add audio files"},
+    "file_dialog.all_files": {"pl": "Wszystkie pliki (*.*)|*.*", "en": "All files (*.*)|*.*"},
+    "file_dialog.add_folder": {"pl": "Dodaj folder z plikami audio", "en": "Add folder with audio files"},
+    "file_dialog.output_folder": {"pl": "Wybierz folder zapisu", "en": "Select output folder"},
+    "prompt.include_subfolders": {
+        "pl": "Dodać też pliki z podfolderów?",
+        "en": "Also add files from subfolders?",
+    },
+    "info.no_supported_files": {
+        "pl": "Nie znaleziono żadnych wspieranych plików w tym folderze.",
+        "en": "No supported files found in this folder.",
+    },
+    "warn.skipped_unsupported_ext": {
+        "pl": "Pominięto {count} plików o niewspieranych rozszerzeniach.",
+        "en": "Skipped {count} files with unsupported extensions.",
+    },
+    "dialog.advanced.title": {"pl": "Ustawienia zaawansowane", "en": "Advanced settings"},
+    "dialog.advanced.group_recognition": {"pl": "Rozpoznawanie", "en": "Recognition"},
+    "dialog.advanced.group_http": {"pl": "HTTP / Shazam", "en": "HTTP / Shazam"},
+    "adv.sample_seconds": {"pl": "Długość próbki (sek):", "en": "Sample length (sec):"},
+    "name.sample_seconds": {"pl": "Długość próbki (sekundy)", "en": "Sample length (seconds)"},
+    "adv.signature_seconds": {"pl": "Długość podpisu (sek):", "en": "Signature length (sec):"},
+    "name.signature_seconds": {"pl": "Długość podpisu (sekundy)", "en": "Signature length (seconds)"},
+    "adv.workers": {"pl": "Wątki:", "en": "Threads:"},
+    "name.workers": {"pl": "Wątki", "en": "Threads"},
+    "adv.min_api_interval": {"pl": "Min odstęp API (sek):", "en": "Min API interval (sec):"},
+    "name.min_api_interval": {"pl": "Min odstęp API (sekundy)", "en": "Min API interval (seconds)"},
+    "adv.recognize_timeout": {"pl": "Timeout rozpoznawania (sek):", "en": "Recognition timeout (sec):"},
+    "name.recognize_timeout": {"pl": "Timeout rozpoznawania (sekundy)", "en": "Recognition timeout (seconds)"},
+    "adv.max_windows": {"pl": "Okna w próbce (max):", "en": "Windows per sample (max):"},
+    "name.max_windows": {"pl": "Okna w próbce", "en": "Windows per sample"},
+    "adv.window_step": {"pl": "Krok okna (sek):", "en": "Window step (sec):"},
+    "name.window_step": {"pl": "Krok okna (sekundy)", "en": "Window step (seconds)"},
+    "adv.silence_dbfs": {"pl": "Próg ciszy (dBFS):", "en": "Silence threshold (dBFS):"},
+    "name.silence_dbfs": {"pl": "Próg ciszy (dBFS)", "en": "Silence threshold (dBFS)"},
+    "adv.debug_audio": {
+        "pl": "Debug audio (loguj parametry/RMS)",
+        "en": "Debug audio (log parameters/RMS)",
+    },
+    "name.debug_audio": {"pl": "Debug audio", "en": "Debug audio"},
+    "adv.accept_language": {
+        "pl": "Accept-Language (nagłówek):",
+        "en": "Accept-Language (header):",
+    },
+    "tooltip.accept_language": {
+        "pl": "Jeśli puste, używany będzie wybrany język Shazam.",
+        "en": "If empty, the selected Shazam language will be used.",
+    },
+    "adv.error.sig_gt_sample": {
+        "pl": "Długość podpisu nie może być większa niż długość próbki.",
+        "en": "Signature length can't be greater than sample length.",
+    },
+    "adv.error.invalid_silence": {
+        "pl": "Nieprawidłowy próg ciszy (dBFS).",
+        "en": "Invalid silence threshold (dBFS).",
+    },
+    "error.add_file_first": {
+        "pl": "Dodaj przynajmniej jeden plik do skanowania.",
+        "en": "Add at least one file to scan.",
+    },
+    "error.interval_positive": {
+        "pl": "Interwał próbkowania musi być dodatni.",
+        "en": "Sampling interval must be positive.",
+    },
+    "error.no_existing_files": {
+        "pl": "Lista nie zawiera żadnych istniejących plików.",
+        "en": "The list doesn't contain any existing files.",
+    },
+    "prompt.unknown_ext": {
+        "pl": "Niektóre pliki mają nietypowe rozszerzenia ({preview}). Spróbować mimo to?",
+        "en": "Some files have unusual extensions ({preview}). Try anyway?",
+    },
+    "error.create_folder": {"pl": "Nie mogę utworzyć folderu: {error}", "en": "Can't create folder: {error}"},
+    "prompt.overwrite_outputs": {
+        "pl": "Istnieje {count} plików wynikowych. Nadpisać wszystkie?",
+        "en": "{count} output files already exist. Overwrite all?",
+    },
+    "error.ffmpeg_missing": {
+        "pl": "Brak ffmpeg (wbudowanego lub na $PATH). W wersji źródłowej doinstaluj ffmpeg (razem z ffprobe) albo uruchom gotowy plik .exe z wbudowanym ffmpeg.",
+        "en": "ffmpeg is missing (bundled or on $PATH). In the source version, install ffmpeg (with ffprobe) or run the packaged .exe that bundles ffmpeg.",
+    },
+    "status.scanning_file": {
+        "pl": "[{file_index}/{file_total}] Skanuję: {filename}",
+        "en": "[{file_index}/{file_total}] Scanning: {filename}",
+    },
+    "status.api_limit_pause": {"pl": "Limit API: pauza {seconds}s...", "en": "API limit: pause {seconds}s..."},
+    "warn.http_429_pause": {
+        "pl": "{timestamp}\tHTTP 429{chain} (limit). Pauza {seconds}s...{extra}",
+        "en": "{timestamp}\tHTTP 429{chain} (limit). Pause {seconds}s...{extra}",
+    },
+    "warn.http_retry": {"pl": "{timestamp}\tHTTP retry{chain}", "en": "{timestamp}\tHTTP retry{chain}"},
+    "warn.silence_skip": {
+        "pl": "{timestamp}\tCisza (RMS {dbfs:.1f} dBFS) — pomijam.",
+        "en": "{timestamp}\tSilence (RMS {dbfs:.1f} dBFS) — skipping.",
+    },
+    "status.sample": {"pl": "Próbka {timestamp}...", "en": "Sample {timestamp}..."},
+    "error.recognize_failed": {"pl": "rozpoznawanie nieudane", "en": "recognize failed"},
+    "info.file_stopped": {
+        "pl": "[{file_index}/{file_total}] Zatrzymano. Wynik: {output_file}",
+        "en": "[{file_index}/{file_total}] Stopped. Output: {output_file}",
+    },
+    "info.file_done": {
+        "pl": "[{file_index}/{file_total}] Zakończono. Wynik: {output_file}",
+        "en": "[{file_index}/{file_total}] Done. Output: {output_file}",
+    },
+    "log.warn_prefix": {"pl": "UWAGA: ", "en": "WARNING: "},
+    "progress.stats": {
+        "pl": ", rozpozn.: {matches}, brak: {nomatch}, błędy: {errors}",
+        "en": ", matches: {matches}, no match: {nomatch}, errors: {errors}",
+    },
+    "progress.stats_rate_limits": {"pl": ", limity: {rate_limits}", "en": ", rate limits: {rate_limits}"},
+    "progress.initial_known_total": {
+        "pl": "{file_prefix}Postęp: 0% (0/{total}), czas: 00:00:00 / {duration}, wątki: {workers}",
+        "en": "{file_prefix}Progress: 0% (0/{total}), time: 00:00:00 / {duration}, threads: {workers}",
+    },
+    "progress.initial_unknown_total": {
+        "pl": "{file_prefix}Postęp: ... , wątki: {workers}",
+        "en": "{file_prefix}Progress: ... , threads: {workers}",
+    },
+    "progress.update_with_eta": {
+        "pl": "{file_prefix}Postęp: {percent}% ({done}/{total}), czas: {elapsed}, ETA: {eta}, pozycja: {offset} / {duration}{stats}",
+        "en": "{file_prefix}Progress: {percent}% ({done}/{total}), time: {elapsed}, ETA: {eta}, position: {offset} / {duration}{stats}",
+    },
+    "progress.update_no_eta": {
+        "pl": "{file_prefix}Postęp: {percent}% ({done}/{total}), pozycja: {offset} / {duration}{stats}",
+        "en": "{file_prefix}Progress: {percent}% ({done}/{total}), position: {offset} / {duration}{stats}",
+    },
+    "progress.update_unknown_total_done": {
+        "pl": "{file_prefix}Postęp: {done} próbek (bez czasu całkowitego){stats}",
+        "en": "{file_prefix}Progress: {done} samples (unknown total){stats}",
+    },
+    "progress.update_unknown_total": {"pl": "{file_prefix}Postęp: ...", "en": "{file_prefix}Progress: ..."},
+    "progress.done": {
+        "pl": "{file_prefix}Postęp: 100% ({total}/{total}), czas: {elapsed} / {duration}, rozpozn.: {matches}, brak: {nomatch}, błędy: {errors}",
+        "en": "{file_prefix}Progress: 100% ({total}/{total}), time: {elapsed} / {duration}, matches: {matches}, no match: {nomatch}, errors: {errors}",
+    },
+    "progress.stopped": {"pl": "{file_prefix}Zatrzymano.", "en": "{file_prefix}Stopped."},
 }
 
 
@@ -220,19 +449,17 @@ def _write_crash_log(text: str) -> Path | None:
 
 
 def main() -> None:
+    t = I18n(ui_language_from_config(_load_config().get("ui_language")), _STRINGS).t
     try:
         _main()
     except Exception:
         trace = traceback.format_exc()
         log_path = _write_crash_log(trace)
 
-        msg = "Nie mogę uruchomić aplikacji."
+        msg = t("crash.unable_start")
         if log_path is not None:
-            msg += f"\n\nSzczegóły zapisano w:\n{log_path}"
-        msg += (
-            "\n\nJeśli to świeża maszyna, doinstaluj: Microsoft Visual C++ "
-            "Redistributable 2015–2022 (x64)."
-        )
+            msg += "\n\n" + t("crash.details_saved", path=str(log_path))
+        msg += "\n\n" + t("crash.vc_redist")
 
         _win_error_dialog(msg)
 
@@ -362,6 +589,9 @@ def _main() -> None:
 
     app = wx.App(False)
     config = _load_config()
+    ui_language = ui_language_from_config(config.get("ui_language"))
+    i18n = I18n(ui_language, _STRINGS)
+    t = i18n.t
 
     class MainFrame(wx.Frame):
         def __init__(self) -> None:
@@ -370,7 +600,7 @@ def _main() -> None:
 
             panel = wx.Panel(self)
             self.CreateStatusBar()
-            self.SetStatusText("Gotowe.")
+            self.SetStatusText(t("status.ready"))
 
             self._events: Queue[tuple[str, Any]] = Queue()
             self._stop_event = threading.Event()
@@ -448,81 +678,89 @@ def _main() -> None:
                 or defaults.shazam_time_zone,
             )
 
-            files_label = wx.StaticText(panel, label="Pliki do skanowania:")
-            self.files_list = wx.ListBox(panel, style=wx.LB_EXTENDED)
-            self.files_list.SetName("Pliki do skanowania")
+            self._ui_language_codes = [code for code, _label in UI_LANGUAGE_CHOICES]
+            ui_lang_label = wx.StaticText(panel, label=t("label.ui_language"))
+            self.ui_language_choice = wx.Choice(
+                panel, choices=[label for _code, label in UI_LANGUAGE_CHOICES]
+            )
+            self.ui_language_choice.SetName(t("name.ui_language"))
+            self.ui_language_choice.SetToolTip(t("tooltip.ui_language"))
+            self.ui_language_choice.SetSelection(0 if ui_language == "pl" else 1)
+            self.ui_language_choice.Bind(wx.EVT_CHOICE, self._on_ui_language_changed)
 
-            self.add_files_btn = wx.Button(panel, label="Dodaj pliki...")
-            self.add_files_btn.SetToolTip("Dodaj jeden lub wiele plików audio.")
+            files_label = wx.StaticText(panel, label=t("label.files_to_scan"))
+            self.files_list = wx.ListBox(panel, style=wx.LB_EXTENDED)
+            self.files_list.SetName(t("name.files_to_scan"))
+
+            self.add_files_btn = wx.Button(panel, label=t("button.add_files"))
+            self.add_files_btn.SetToolTip(t("tooltip.add_files"))
             self.add_files_btn.Bind(wx.EVT_BUTTON, self._on_add_files)
 
-            self.add_folder_btn = wx.Button(panel, label="Dodaj folder...")
-            self.add_folder_btn.SetToolTip("Dodaj wszystkie wspierane pliki z folderu.")
+            self.add_folder_btn = wx.Button(panel, label=t("button.add_folder"))
+            self.add_folder_btn.SetToolTip(t("tooltip.add_folder"))
             self.add_folder_btn.Bind(wx.EVT_BUTTON, self._on_add_folder)
 
-            self.remove_files_btn = wx.Button(panel, label="Usuń zaznaczone")
-            self.remove_files_btn.SetToolTip("Usuń zaznaczone pliki z listy.")
+            self.remove_files_btn = wx.Button(panel, label=t("button.remove_selected"))
+            self.remove_files_btn.SetToolTip(t("tooltip.remove_selected"))
             self.remove_files_btn.Bind(wx.EVT_BUTTON, self._on_remove_files)
 
-            self.clear_files_btn = wx.Button(panel, label="Wyczyść listę")
-            self.clear_files_btn.SetToolTip("Usuń wszystkie pliki z listy.")
+            self.clear_files_btn = wx.Button(panel, label=t("button.clear_list"))
+            self.clear_files_btn.SetToolTip(t("tooltip.clear_list"))
             self.clear_files_btn.Bind(wx.EVT_BUTTON, self._on_clear_files)
 
-            out_dir_label = wx.StaticText(panel, label="Folder zapisu (opcjonalnie):")
+            out_dir_label = wx.StaticText(panel, label=t("label.output_folder_optional"))
             self.out_dir = wx.TextCtrl(panel, value=str(config.get("output_dir") or ""))
-            self.out_dir.SetName("Folder zapisu")
-            self.out_dir_browse_btn = wx.Button(panel, label="Wybierz...")
-            self.out_dir_browse_btn.SetToolTip(
-                "Wybierz folder, w którym powstanie plik .txt; jeśli puste, zapis obok źródła."
-            )
+            self.out_dir.SetName(t("name.output_folder"))
+            self.out_dir_browse_btn = wx.Button(panel, label=t("button.browse"))
+            self.out_dir_browse_btn.SetToolTip(t("tooltip.output_folder_browse"))
             self.out_dir_browse_btn.Bind(wx.EVT_BUTTON, self._on_browse_output_dir)
 
-            interval_label = wx.StaticText(panel, label="Próbka co (sek):")
+            interval_label = wx.StaticText(panel, label=t("label.interval_seconds"))
             self.interval = wx.SpinCtrl(
                 panel,
                 min=1,
                 max=24 * 60 * 60,
                 initial=_clamp_int(config.get("interval_s", 30), minimum=1, maximum=24 * 60 * 60),
             )
-            self.interval.SetName("Próbka co (sekundy)")
+            self.interval.SetName(t("name.interval_seconds"))
 
-            language_label = wx.StaticText(panel, label="Język Shazam:")
+            language_label = wx.StaticText(panel, label=t("label.shazam_language"))
             self._language_codes = language_codes()
             self.language_choice = wx.Choice(panel, choices=language_choice_strings())
-            self.language_choice.SetName("Język Shazam")
-            self.language_choice.SetToolTip("Język (locale) używany przez Shazam API.")
+            self.language_choice.SetName(t("name.shazam_language"))
+            self.language_choice.SetToolTip(t("tooltip.shazam_language"))
             cfg_language = str(config.get("language") or "").strip() or _SHAZAM_URL_LANGUAGE
             lang_idx = find_index_by_code(SUPPORTED_LANGUAGES, cfg_language)
             self.language_choice.SetSelection(lang_idx if lang_idx is not None else 0)
 
-            country_label = wx.StaticText(panel, label="Kraj Shazam:")
+            country_label = wx.StaticText(panel, label=t("label.shazam_country"))
             self._country_codes = country_codes()
             self.country_choice = wx.Choice(panel, choices=country_choice_strings())
-            self.country_choice.SetName("Kraj Shazam")
-            self.country_choice.SetToolTip("Kraj (endpoint_country) używany przez Shazam API.")
+            self.country_choice.SetName(t("name.shazam_country"))
+            self.country_choice.SetToolTip(t("tooltip.shazam_country"))
             cfg_country = str(config.get("endpoint_country") or "").strip() or _SHAZAM_ENDPOINT_COUNTRY
             country_idx = find_index_by_code(SUPPORTED_ENDPOINT_COUNTRIES, cfg_country)
             self.country_choice.SetSelection(country_idx if country_idx is not None else 0)
 
             self.progress = wx.Gauge(panel, range=100)
-            self.progress.SetName("Postęp")
+            self.progress.SetName(t("name.progress"))
             self.progress.SetValue(0)
-            self.progress_text = wx.StaticText(panel, label="Postęp: 0%")
-            self.progress_text.SetName("Postęp (tekst)")
+            self.progress_text = wx.StaticText(panel, label=t("label.progress_initial"))
+            self.progress_text.SetName(t("name.progress_text"))
 
             self.log = wx.TextCtrl(panel, style=wx.TE_MULTILINE | wx.TE_READONLY)
-            self.log.SetName("Wyniki skanowania")
+            self.log.SetName(t("name.scan_results"))
 
-            self.scan_btn = wx.Button(panel, label="Skanuj")
-            self.scan_btn.SetToolTip("Rozpocznij skanowanie wybranych plików.")
+            self.scan_btn = wx.Button(panel, label=t("button.scan"))
+            self.scan_btn.SetToolTip(t("tooltip.scan"))
             self.scan_btn.Bind(wx.EVT_BUTTON, self._on_scan)
-            self.stop_btn = wx.Button(panel, label="Stop")
-            self.stop_btn.SetToolTip("Zatrzymaj skanowanie.")
+            self.stop_btn = wx.Button(panel, label=t("button.stop"))
+            self.stop_btn.SetToolTip(t("tooltip.stop"))
             self.stop_btn.Bind(wx.EVT_BUTTON, self._on_stop)
             self.stop_btn.Disable()
 
-            self.advanced_btn = wx.Button(panel, label="Ustawienia zaawansowane…")
-            self.advanced_btn.SetToolTip("Parametry wpływające na dokładność/limity API.")
+            self.advanced_btn = wx.Button(panel, label=t("button.advanced"))
+            self.advanced_btn.SetToolTip(t("tooltip.advanced"))
             self.advanced_btn.Bind(wx.EVT_BUTTON, self._on_advanced)
 
             file_buttons = wx.BoxSizer(wx.HORIZONTAL)
@@ -531,8 +769,11 @@ def _main() -> None:
             file_buttons.Add(self.remove_files_btn, 0, wx.RIGHT, 8)
             file_buttons.Add(self.clear_files_btn, 0)
 
-            opts = wx.FlexGridSizer(rows=4, cols=3, vgap=8, hgap=8)
+            opts = wx.FlexGridSizer(rows=5, cols=3, vgap=8, hgap=8)
             opts.AddGrowableCol(1, 1)
+            opts.Add(ui_lang_label, 0, wx.ALIGN_CENTER_VERTICAL)
+            opts.Add(self.ui_language_choice, 0)
+            opts.Add((1, 1))
             opts.Add(out_dir_label, 0, wx.ALIGN_CENTER_VERTICAL)
             opts.Add(self.out_dir, 1, wx.EXPAND)
             opts.Add(self.out_dir_browse_btn, 0)
@@ -562,7 +803,7 @@ def _main() -> None:
             root.Add(file_buttons, 0, wx.EXPAND | wx.ALL, 12)
             root.Add(opts, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 12)
             root.Add(progress_row, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
-            root.Add(wx.StaticText(panel, label="Wyniki:"), 0, wx.LEFT | wx.RIGHT, 12)
+            root.Add(wx.StaticText(panel, label=t("label.results")), 0, wx.LEFT | wx.RIGHT, 12)
             root.Add(self.log, 1, wx.EXPAND | wx.ALL, 12)
             root.Add(buttons, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
             panel.SetSizer(root)
@@ -583,6 +824,7 @@ def _main() -> None:
             self.add_folder_btn.Enable(not running)
             self.remove_files_btn.Enable(not running)
             self.clear_files_btn.Enable(not running)
+            self.ui_language_choice.Enable(not running)
             self.out_dir.Enable(not running)
             self.out_dir_browse_btn.Enable(not running)
             self.interval.Enable(not running)
@@ -591,6 +833,11 @@ def _main() -> None:
             self.advanced_btn.Enable(not running)
 
         def _collect_config(self) -> dict[str, Any]:
+            ui_language_value = ui_language
+            ui_idx = self.ui_language_choice.GetSelection()
+            if ui_idx != wx.NOT_FOUND and ui_idx < len(self._ui_language_codes):
+                ui_language_value = self._ui_language_codes[ui_idx]
+
             language = _SHAZAM_URL_LANGUAGE
             lang_idx = self.language_choice.GetSelection()
             if lang_idx != wx.NOT_FOUND and lang_idx < len(self._language_codes):
@@ -603,6 +850,7 @@ def _main() -> None:
 
             return {
                 "version": _CONFIG_VERSION,
+                "ui_language": ui_language_value,
                 "input_paths": [str(p) for p in self._input_paths[:200]],
                 "output_dir": self.out_dir.GetValue(),
                 "interval_s": int(self.interval.GetValue()),
@@ -631,7 +879,7 @@ def _main() -> None:
             try:
                 _save_config(self._collect_config())
             except Exception as exc:
-                self.SetStatusText(f"Nie udało się zapisać config: {exc}")
+                self.SetStatusText(t("status.config_save_failed", error=str(exc)))
 
         def _load_input_paths_from_config(self) -> None:
             raw_list = config.get("input_paths")
@@ -652,7 +900,11 @@ def _main() -> None:
                 return
             self._input_paths.append(path)
             self.files_list.Append(str(path))
-            self.SetStatusText(f"Wybrano plików: {len(self._input_paths)}")
+            self.SetStatusText(t("status.files_selected", count=len(self._input_paths)))
+
+        def _on_ui_language_changed(self, _event: wx.CommandEvent) -> None:
+            self._persist_config()
+            wx.MessageBox(t("info.restart_required"), _APP_NAME, wx.OK | wx.ICON_INFORMATION, self)
 
         def _on_add_files(self, _event: wx.CommandEvent) -> None:
             wildcard = (
@@ -660,7 +912,7 @@ def _main() -> None:
                 "*.mp4;*.m4a;*.ts;*.loas;*.latm)|"
                 "*.mp3;*.mp2;*.aac;*.flac;*.wav;*.ogg;*.opus;"
                 "*.mp4;*.m4a;*.ts;*.loas;*.latm|"
-                "Wszystkie pliki (*.*)|*.*"
+                + t("file_dialog.all_files")
             )
 
             start_dir = ""
@@ -669,7 +921,7 @@ def _main() -> None:
 
             with wx.FileDialog(
                 self,
-                message="Dodaj pliki audio",
+                message=t("file_dialog.add_files"),
                 defaultDir=start_dir,
                 wildcard=wildcard,
                 style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE,
@@ -692,14 +944,14 @@ def _main() -> None:
                 start_dir = str(self._input_paths[-1].parent)
 
             with wx.DirDialog(
-                self, message="Dodaj folder z plikami audio", defaultPath=start_dir
+                self, message=t("file_dialog.add_folder"), defaultPath=start_dir
             ) as dialog:
                 if dialog.ShowModal() == wx.ID_CANCEL:
                     return
                 folder = Path(dialog.GetPath()).expanduser()
 
             include_sub = wx.MessageBox(
-                "Dodać też pliki z podfolderów?",
+                t("prompt.include_subfolders"),
                 _APP_NAME,
                 wx.YES_NO | wx.ICON_QUESTION,
                 self,
@@ -720,7 +972,7 @@ def _main() -> None:
 
             if not added:
                 wx.MessageBox(
-                    "Nie znaleziono żadnych wspieranych plików w tym folderze.",
+                    t("info.no_supported_files"),
                     _APP_NAME,
                     wx.OK | wx.ICON_INFORMATION,
                     self,
@@ -729,7 +981,7 @@ def _main() -> None:
 
             if skipped:
                 self.log.AppendText(
-                    f"UWAGA: Pominięto {skipped} plików o niewspieranych rozszerzeniach.\n"
+                    f"{t('log.warn_prefix')}{t('warn.skipped_unsupported_ext', count=skipped)}\n"
                 )
             self._persist_config()
 
@@ -741,13 +993,13 @@ def _main() -> None:
                 if 0 <= idx < len(self._input_paths):
                     self._input_paths.pop(idx)
                 self.files_list.Delete(idx)
-            self.SetStatusText(f"Wybrano plików: {len(self._input_paths)}")
+            self.SetStatusText(t("status.files_selected", count=len(self._input_paths)))
             self._persist_config()
 
         def _on_clear_files(self, _event: wx.CommandEvent) -> None:
             self._input_paths.clear()
             self.files_list.Clear()
-            self.SetStatusText("Gotowe.")
+            self.SetStatusText(t("status.ready"))
             self._persist_config()
 
         def _on_browse_output_dir(self, _event: wx.CommandEvent) -> None:
@@ -756,7 +1008,7 @@ def _main() -> None:
                 start_dir = str(Path(value).expanduser())
 
             with wx.DirDialog(
-                self, message="Wybierz folder zapisu", defaultPath=start_dir
+                self, message=t("file_dialog.output_folder"), defaultPath=start_dir
             ) as dialog:
                 if dialog.ShowModal() == wx.ID_CANCEL:
                     return
@@ -802,58 +1054,61 @@ def _main() -> None:
 
             dialog = wx.Dialog(
                 self,
-                title="Ustawienia zaawansowane",
+                title=t("dialog.advanced.title"),
                 style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
             )
             dialog.SetMinClientSize((740, 600))
             panel = wx.Panel(dialog)
 
-            recog_box = wx.StaticBoxSizer(wx.StaticBox(panel, label="Rozpoznawanie"), wx.VERTICAL)
+            recog_box = wx.StaticBoxSizer(
+                wx.StaticBox(panel, label=t("dialog.advanced.group_recognition")),
+                wx.VERTICAL,
+            )
             recog_grid = wx.FlexGridSizer(cols=2, vgap=8, hgap=8)
             recog_grid.AddGrowableCol(1, 1)
 
-            sample_label = wx.StaticText(panel, label="Długość próbki (sek):")
+            sample_label = wx.StaticText(panel, label=t("adv.sample_seconds"))
             sample = wx.SpinCtrl(
                 panel, min=5, max=60, initial=int(self._advanced.sample_duration_s)
             )
-            sample.SetName("Długość próbki (sekundy)")
+            sample.SetName(t("name.sample_seconds"))
 
-            sig_label = wx.StaticText(panel, label="Długość podpisu (sek):")
+            sig_label = wx.StaticText(panel, label=t("adv.signature_seconds"))
             sig = wx.SpinCtrl(panel, min=5, max=60, initial=int(self._advanced.sig_duration_s))
-            sig.SetName("Długość podpisu (sekundy)")
+            sig.SetName(t("name.signature_seconds"))
 
-            workers_label = wx.StaticText(panel, label="Wątki:")
+            workers_label = wx.StaticText(panel, label=t("adv.workers"))
             workers = wx.SpinCtrl(panel, min=1, max=32, initial=int(self._advanced.workers))
-            workers.SetName("Wątki")
+            workers.SetName(t("name.workers"))
 
-            api_interval_label = wx.StaticText(panel, label="Min odstęp API (sek):")
+            api_interval_label = wx.StaticText(panel, label=t("adv.min_api_interval"))
             api_interval = wx.SpinCtrl(
                 panel, min=0, max=60, initial=int(self._advanced.min_api_interval_s)
             )
-            api_interval.SetName("Min odstęp API (sekundy)")
+            api_interval.SetName(t("name.min_api_interval"))
 
-            timeout_label = wx.StaticText(panel, label="Timeout rozpoznawania (sek):")
+            timeout_label = wx.StaticText(panel, label=t("adv.recognize_timeout"))
             timeout = wx.SpinCtrl(
                 panel, min=10, max=600, initial=int(self._advanced.recognize_timeout_s)
             )
-            timeout.SetName("Timeout rozpoznawania (sekundy)")
+            timeout.SetName(t("name.recognize_timeout"))
 
-            windows_label = wx.StaticText(panel, label="Okna w próbce (max):")
+            windows_label = wx.StaticText(panel, label=t("adv.max_windows"))
             windows = wx.SpinCtrl(
                 panel, min=1, max=6, initial=int(self._advanced.max_windows_per_sample)
             )
-            windows.SetName("Okna w próbce")
+            windows.SetName(t("name.max_windows"))
 
-            step_label = wx.StaticText(panel, label="Krok okna (sek):")
+            step_label = wx.StaticText(panel, label=t("adv.window_step"))
             step = wx.SpinCtrl(panel, min=1, max=60, initial=int(self._advanced.window_step_s))
-            step.SetName("Krok okna (sekundy)")
+            step.SetName(t("name.window_step"))
 
-            silence_label = wx.StaticText(panel, label="Próg ciszy (dBFS):")
+            silence_label = wx.StaticText(panel, label=t("adv.silence_dbfs"))
             silence = wx.TextCtrl(panel, value=str(self._advanced.silence_dbfs_threshold))
-            silence.SetName("Próg ciszy (dBFS)")
+            silence.SetName(t("name.silence_dbfs"))
 
-            debug = wx.CheckBox(panel, label="Debug audio (loguj parametry/RMS)")
-            debug.SetName("Debug audio")
+            debug = wx.CheckBox(panel, label=t("adv.debug_audio"))
+            debug.SetName(t("name.debug_audio"))
             debug.SetValue(bool(self._advanced.debug_audio))
 
             for label, ctrl in [
@@ -872,7 +1127,10 @@ def _main() -> None:
             recog_box.Add(recog_grid, 0, wx.ALL | wx.EXPAND, 8)
             recog_box.Add(debug, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
 
-            http_box = wx.StaticBoxSizer(wx.StaticBox(panel, label="HTTP / Shazam"), wx.VERTICAL)
+            http_box = wx.StaticBoxSizer(
+                wx.StaticBox(panel, label=t("dialog.advanced.group_http")),
+                wx.VERTICAL,
+            )
             http_grid = wx.FlexGridSizer(cols=2, vgap=8, hgap=8)
             http_grid.AddGrowableCol(1, 1)
 
@@ -880,10 +1138,10 @@ def _main() -> None:
             device = wx.TextCtrl(panel, value=self._advanced.shazam_device)
             device.SetName("Device (URL)")
 
-            accept_label = wx.StaticText(panel, label="Accept-Language (nagłówek):")
+            accept_label = wx.StaticText(panel, label=t("adv.accept_language"))
             accept = wx.TextCtrl(panel, value=self._advanced.shazam_accept_language)
             accept.SetName("Accept-Language")
-            accept.SetToolTip("Jeśli puste, używany będzie wybrany język Shazam.")
+            accept.SetToolTip(t("tooltip.accept_language"))
 
             ua_label = wx.StaticText(panel, label="User-Agent:")
             ua = wx.TextCtrl(panel, value=self._advanced.shazam_user_agent)
@@ -942,7 +1200,7 @@ def _main() -> None:
                 sig_s = int(sig.GetValue())
                 if sig_s > sample_s:
                     wx.MessageBox(
-                        "Długość podpisu nie może być większa niż długość próbki.",
+                        t("adv.error.sig_gt_sample"),
                         _APP_NAME,
                         wx.OK | wx.ICON_ERROR,
                         dialog,
@@ -953,7 +1211,7 @@ def _main() -> None:
                     silence_dbfs = float(silence.GetValue().strip().replace(",", "."))
                 except ValueError:
                     wx.MessageBox(
-                        "Nieprawidłowy próg ciszy (dBFS).",
+                        t("adv.error.invalid_silence"),
                         _APP_NAME,
                         wx.OK | wx.ICON_ERROR,
                         dialog,
@@ -993,7 +1251,7 @@ def _main() -> None:
 
             if not self._input_paths:
                 wx.MessageBox(
-                    "Dodaj przynajmniej jeden plik do skanowania.",
+                    t("error.add_file_first"),
                     _APP_NAME,
                     wx.OK | wx.ICON_ERROR,
                     self,
@@ -1003,7 +1261,7 @@ def _main() -> None:
             interval_s = int(self.interval.GetValue())
             if interval_s <= 0:
                 wx.MessageBox(
-                    "Interwał próbkowania musi być dodatni.", _APP_NAME, wx.OK | wx.ICON_ERROR, self
+                    t("error.interval_positive"), _APP_NAME, wx.OK | wx.ICON_ERROR, self
                 )
                 return
 
@@ -1020,7 +1278,7 @@ def _main() -> None:
             input_paths = [p for p in self._input_paths if p.exists() and p.is_file()]
             if not input_paths:
                 wx.MessageBox(
-                    "Lista nie zawiera żadnych istniejących plików.",
+                    t("error.no_existing_files"),
                     _APP_NAME,
                     wx.OK | wx.ICON_ERROR,
                     self,
@@ -1032,7 +1290,7 @@ def _main() -> None:
                 exts = sorted({p.suffix.lower() or "(brak)" for p in unknown_suffixes})
                 preview = ", ".join(exts[:8]) + ("..." if len(exts) > 8 else "")
                 res = wx.MessageBox(
-                    f"Niektóre pliki mają nietypowe rozszerzenia ({preview}). Spróbować mimo to?",
+                    t("prompt.unknown_ext", preview=preview),
                     _APP_NAME,
                     wx.YES_NO | wx.ICON_WARNING,
                     self,
@@ -1047,7 +1305,7 @@ def _main() -> None:
                     output_override.mkdir(parents=True, exist_ok=True)
                 except OSError as exc:
                     wx.MessageBox(
-                        f"Nie mogę utworzyć folderu: {exc}",
+                        t("error.create_folder", error=str(exc)),
                         _APP_NAME,
                         wx.OK | wx.ICON_ERROR,
                         self,
@@ -1073,7 +1331,7 @@ def _main() -> None:
 
             if existing_outputs:
                 res = wx.MessageBox(
-                    f"Istnieje {len(existing_outputs)} plików wynikowych. Nadpisać wszystkie?",
+                    t("prompt.overwrite_outputs", count=len(existing_outputs)),
                     _APP_NAME,
                     wx.YES_NO | wx.ICON_WARNING,
                     self,
@@ -1085,7 +1343,7 @@ def _main() -> None:
             self.progress.SetValue(0)
             self._stop_event.clear()
             self._set_running(True)
-            self.SetStatusText("Start...")
+            self.SetStatusText(t("status.starting"))
 
             self._persist_config()
 
@@ -1104,7 +1362,7 @@ def _main() -> None:
 
         def _on_stop(self, _event: wx.CommandEvent) -> None:
             self._stop_event.set()
-            self.SetStatusText("Zatrzymywanie...")
+            self.SetStatusText(t("status.stopping"))
 
         def _worker_main(
             self,
@@ -1136,16 +1394,14 @@ def _main() -> None:
                         self._events.put(("warn", f"{input_path.name}\t{exc}"))
 
                 if self._stop_event.is_set():
-                    self._events.put(("stopped", "Zatrzymano."))
+                    self._events.put(("stopped", t("status.stopped")))
                 else:
-                    self._events.put(("done", "Zakończono."))
+                    self._events.put(("done", t("status.done")))
             except FfmpegNotFoundError:
                 self._events.put(
                     (
                         "error",
-                        "Brak ffmpeg (wbudowanego lub na $PATH). "
-                        "W wersji źródłowej doinstaluj ffmpeg (razem z ffprobe) "
-                        "albo uruchom gotowy plik .exe z wbudowanym ffmpeg.",
+                        t("error.ffmpeg_missing"),
                     )
                 )
             except Exception as exc:
@@ -1207,7 +1463,17 @@ def _main() -> None:
                         },
                     )
                 )
-                self._events.put(("status", f"[{file_index}/{file_total}] Skanuję: {input_path.name}"))
+                self._events.put(
+                    (
+                        "status",
+                        t(
+                            "status.scanning_file",
+                            file_index=file_index,
+                            file_total=file_total,
+                            filename=input_path.name,
+                        ),
+                    )
+                )
 
                 seen: set[str] = set()
                 started = time.monotonic()
@@ -1404,7 +1670,9 @@ def _main() -> None:
 
                         wait_s = throttle.peek_wait_seconds()
                         if wait_s >= 5:
-                            self._events.put(("status", f"Limit API: pauza {wait_s}s..."))
+                            self._events.put(
+                                ("status", t("status.api_limit_pause", seconds=wait_s))
+                            )
                         throttle.wait_for_slot()
 
                         try:
@@ -1456,7 +1724,13 @@ def _main() -> None:
                                 self._events.put(
                                     (
                                         "warn",
-                                        f"{format_hms(label_offset_s)}\tHTTP 429{chain} (limit). Pauza {wait_s}s...{extra_info}",
+                                        t(
+                                            "warn.http_429_pause",
+                                            timestamp=format_hms(label_offset_s),
+                                            chain=chain,
+                                            seconds=wait_s,
+                                            extra=extra_info,
+                                        ),
                                     )
                                 )
                                 continue
@@ -1485,7 +1759,11 @@ def _main() -> None:
                             self._events.put(
                                 (
                                     "warn",
-                                    f"{format_hms(label_offset_s)}\tHTTP retry{chain}",
+                                    t(
+                                        "warn.http_retry",
+                                        timestamp=format_hms(label_offset_s),
+                                        chain=chain,
+                                    ),
                                 )
                             )
                             if status == 200:
@@ -1499,7 +1777,13 @@ def _main() -> None:
                             self._events.put(
                                 (
                                     "warn",
-                                    f"{format_hms(label_offset_s)}\tHTTP 429{chain} (limit). Pauza {wait_s}s...",
+                                    t(
+                                        "warn.http_429_pause",
+                                        timestamp=format_hms(label_offset_s),
+                                        chain=chain,
+                                        seconds=wait_s,
+                                        extra="",
+                                    ),
                                 )
                             )
                             continue
@@ -1523,7 +1807,7 @@ def _main() -> None:
                         throttle.note_success()
                         return raw, None
 
-                    return None, "recognize failed"
+                    return None, t("error.recognize_failed")
 
                 audio_meta_lock = threading.Lock()
                 audio_meta_logged = False
@@ -1641,15 +1925,19 @@ def _main() -> None:
                                 )
                             )
 
-                    if best_dbfs < silence_dbfs_threshold:
-                        if debug_audio:
-                            self._events.put(
-                                (
-                                    "warn",
-                                    f"{format_hms(offset_s)}\tCisza (RMS {best_dbfs:.1f} dBFS) — pomijam.",
+                        if best_dbfs < silence_dbfs_threshold:
+                            if debug_audio:
+                                self._events.put(
+                                    (
+                                        "warn",
+                                        t(
+                                            "warn.silence_skip",
+                                            timestamp=format_hms(offset_s),
+                                            dbfs=best_dbfs,
+                                        ),
+                                    )
                                 )
-                            )
-                        return offset_s, None, None
+                            return offset_s, None, None
 
                     for rel_start_s in window_starts:
                         if self._stop_event.is_set():
@@ -1666,7 +1954,7 @@ def _main() -> None:
                         if error:
                             return label_offset_s, None, error
                         if raw is None:
-                            return label_offset_s, None, "recognize failed"
+                            return label_offset_s, None, t("error.recognize_failed")
 
                         try:
                             track = Serialize.full_track(raw)
@@ -1684,7 +1972,9 @@ def _main() -> None:
                         offset_s = 0
                         done = 0
                         while not self._stop_event.is_set():
-                            self._events.put(("status", f"Próbka {format_hms(offset_s)}..."))
+                            self._events.put(
+                                ("status", t("status.sample", timestamp=format_hms(offset_s)))
+                            )
                             sample_offset, line, error = _process_sample(offset_s)
                             if error == "eof":
                                 break
@@ -1825,14 +2115,24 @@ def _main() -> None:
                     self._events.put(
                         (
                             "info",
-                            f"[{file_index}/{file_total}] Zatrzymano. Wynik: {output_file}",
+                            t(
+                                "info.file_stopped",
+                                file_index=file_index,
+                                file_total=file_total,
+                                output_file=str(output_file),
+                            ),
                         )
                     )
                 else:
                     self._events.put(
                         (
                             "info",
-                            f"[{file_index}/{file_total}] Zakończono. Wynik: {output_file}",
+                            t(
+                                "info.file_done",
+                                file_index=file_index,
+                                file_total=file_total,
+                                output_file=str(output_file),
+                            ),
                         )
                     )
             except FfmpegNotFoundError:
@@ -1882,11 +2182,22 @@ def _main() -> None:
                             format_hms(self._scan_duration_s) if self._scan_duration_s else "?"
                         )
                         self.progress_text.SetLabel(
-                            f"{file_prefix}Postęp: 0% (0/{total_samples}), czas: 00:00:00 / {duration_label}, "
-                            f"wątki: {workers}"
+                            t(
+                                "progress.initial_known_total",
+                                file_prefix=file_prefix,
+                                total=total_samples,
+                                duration=duration_label,
+                                workers=workers,
+                            )
                         )
                     else:
-                        self.progress_text.SetLabel(f"{file_prefix}Postęp: ... , wątki: {workers}")
+                        self.progress_text.SetLabel(
+                            t(
+                                "progress.initial_unknown_total",
+                                file_prefix=file_prefix,
+                                workers=workers,
+                            )
+                        )
                 elif kind == "status":
                     self.SetStatusText(payload)
                 elif kind == "progress":
@@ -1906,12 +2217,14 @@ def _main() -> None:
                     if (rate_limits := payload.get("rate_limits")) is not None:
                         self._scan_rate_limits = int(rate_limits)
 
-                    stats = (
-                        f", rozpozn.: {self._scan_matches}, brak: {self._scan_nomatch}, "
-                        f"błędy: {self._scan_errors}"
+                    stats = t(
+                        "progress.stats",
+                        matches=self._scan_matches,
+                        nomatch=self._scan_nomatch,
+                        errors=self._scan_errors,
                     )
                     if self._scan_rate_limits:
-                        stats += f", limity: {self._scan_rate_limits}"
+                        stats += t("progress.stats_rate_limits", rate_limits=self._scan_rate_limits)
 
                     if total:
                         percent = int(min(100, (int(done) / max(1, int(total))) * 100))
@@ -1926,29 +2239,53 @@ def _main() -> None:
                         if eta_s is not None and elapsed_s is not None:
                             self._scan_elapsed_s = int(elapsed_s)
                             self.progress_text.SetLabel(
-                                f"{file_prefix}Postęp: {percent}% ({done}/{total}), "
-                                f"czas: {format_hms(elapsed_s)}, ETA: {format_hms(eta_s)}, "
-                                f"pozycja: {offset_label} / {duration_label}{stats}"
+                                t(
+                                    "progress.update_with_eta",
+                                    file_prefix=file_prefix,
+                                    percent=percent,
+                                    done=done,
+                                    total=total,
+                                    elapsed=format_hms(elapsed_s),
+                                    eta=format_hms(eta_s),
+                                    offset=offset_label,
+                                    duration=duration_label,
+                                    stats=stats,
+                                )
                             )
                         else:
                             self.progress_text.SetLabel(
-                                f"{file_prefix}Postęp: {percent}% ({done}/{total}), "
-                                f"pozycja: {offset_label} / {duration_label}{stats}"
+                                t(
+                                    "progress.update_no_eta",
+                                    file_prefix=file_prefix,
+                                    percent=percent,
+                                    done=done,
+                                    total=total,
+                                    offset=offset_label,
+                                    duration=duration_label,
+                                    stats=stats,
+                                )
                             )
                     else:
                         self.progress.Pulse()
                         if done:
                             self.progress_text.SetLabel(
-                                f"{file_prefix}Postęp: {done} próbek (bez czasu całkowitego){stats}"
+                                t(
+                                    "progress.update_unknown_total_done",
+                                    file_prefix=file_prefix,
+                                    done=done,
+                                    stats=stats,
+                                )
                             )
                         else:
-                            self.progress_text.SetLabel(f"{file_prefix}Postęp: ...")
+                            self.progress_text.SetLabel(
+                                t("progress.update_unknown_total", file_prefix=file_prefix)
+                            )
                 elif kind == "match":
                     self.log.AppendText(payload + "\n")
                 elif kind == "info":
                     self.log.AppendText(payload + "\n")
                 elif kind == "warn":
-                    self.log.AppendText(f"UWAGA: {payload}\n")
+                    self.log.AppendText(f"{t('log.warn_prefix')}{payload}\n")
                 elif kind in {"done", "stopped"}:
                     file_prefix = ""
                     if self._scan_file_index and self._scan_file_total:
@@ -1963,15 +2300,21 @@ def _main() -> None:
                         )
                         total_samples = self._scan_total_samples
                         self.progress_text.SetLabel(
-                            f"{file_prefix}Postęp: 100% ({total_samples}/{total_samples}), "
-                            f"czas: {format_hms(self._scan_elapsed_s)} / {duration_label}"
-                            f", rozpozn.: {self._scan_matches}, brak: {self._scan_nomatch}, "
-                            f"błędy: {self._scan_errors}"
+                            t(
+                                "progress.done",
+                                file_prefix=file_prefix,
+                                total=total_samples,
+                                elapsed=format_hms(self._scan_elapsed_s),
+                                duration=duration_label,
+                                matches=self._scan_matches,
+                                nomatch=self._scan_nomatch,
+                                errors=self._scan_errors,
+                            )
                         )
                     elif kind == "stopped":
-                        self.progress_text.SetLabel(f"{file_prefix}Zatrzymano.")
+                        self.progress_text.SetLabel(t("progress.stopped", file_prefix=file_prefix))
                 elif kind == "error":
-                    self.SetStatusText("Błąd.")
+                    self.SetStatusText(t("status.error"))
                     wx.MessageBox(payload, _APP_NAME, wx.OK | wx.ICON_ERROR, self)
                     self._stop_event.set()
                     self._set_running(False)
