@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6.0.0
+        with:
+          python-version-file: pyproject.toml
+          cache-dependency-path: pyproject.toml
+          cache: pip
+
+      - name: install native dependencies
+        run: sudo apt install -y portaudio19-dev
+
+      - name: lint
+        run: make lint INSTALL_EXTRA=lint

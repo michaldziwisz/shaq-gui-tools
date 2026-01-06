@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shaqcast"
+version = "0.1.0"
+description = "Loopback audio capture -> Shoutcast relay (Windows)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26,<2.0",
+  "shazamio>=0.6,<0.9",
+  "soundcard>=0.4.5",
+  "wxPython>=4.2.0",
+]
+
+[project.scripts]
+shaqcast = "shaqcast.__main__:main"
+
+[project.optional-dependencies]
+test = ["pytest"]
+dev = ["shaqcast[test]"]

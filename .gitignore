@@ -1,0 +1,37 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Packaging / builds
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Local virtualenvs
+.venv/
+.venv*/
+
+# App outputs / local artifacts
+historia*.txt
+*.log
+crash.log
+
+# PyInstaller build outputs (project-local)
+shaq/build/
+shaq/build_alt/
+shaq/dist/
+shaqcast/build/
+shaqcast/build_alt/
+shaqcast/dist/
+
+# Bundled binaries (keep download script + README, but not the EXEs)
+shaq/vendor/ffmpeg/*.exe
+
+# Upstream git metadata (repo is monorepo now)
+shaq/.git-upstream/
