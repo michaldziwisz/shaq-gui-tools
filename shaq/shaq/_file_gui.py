@@ -134,6 +134,18 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "button.clear_list": {"pl": "Wyczyść listę", "en": "Clear list"},
     "tooltip.clear_list": {"pl": "Usuń wszystkie pliki z listy.", "en": "Remove all files from the list."},
+    "label.remember_file_list": {
+        "pl": "Pamiętaj listę plików między sesjami",
+        "en": "Remember file list between sessions",
+    },
+    "name.remember_file_list": {
+        "pl": "Pamiętaj listę plików",
+        "en": "Remember file list",
+    },
+    "tooltip.remember_file_list": {
+        "pl": "Jeżeli zaznaczone, lista plików zostanie przywrócona przy następnym uruchomieniu.",
+        "en": "If checked, the file list will be restored on next startup.",
+    },
     "label.output_folder_optional": {
         "pl": "Folder zapisu (opcjonalnie):",
         "en": "Output folder (optional):",
@@ -617,6 +629,7 @@ def _main() -> None:
             self._scan_file_name: str | None = None
 
             self._input_paths: list[Path] = []
+            self._remember_file_list: bool = bool(config.get("remember_file_list", True))
 
             adv_cfg = config.get("advanced") if isinstance(config.get("advanced"), dict) else {}
             defaults = _AdvancedSettings()
@@ -707,6 +720,12 @@ def _main() -> None:
             self.clear_files_btn = wx.Button(panel, label=t("button.clear_list"))
             self.clear_files_btn.SetToolTip(t("tooltip.clear_list"))
             self.clear_files_btn.Bind(wx.EVT_BUTTON, self._on_clear_files)
+
+            self.remember_files_cb = wx.CheckBox(panel, label=t("label.remember_file_list"))
+            self.remember_files_cb.SetName(t("name.remember_file_list"))
+            self.remember_files_cb.SetToolTip(t("tooltip.remember_file_list"))
+            self.remember_files_cb.SetValue(self._remember_file_list)
+            self.remember_files_cb.Bind(wx.EVT_CHECKBOX, self._on_remember_files_changed)
 
             out_dir_label = wx.StaticText(panel, label=t("label.output_folder_optional"))
             self.out_dir = wx.TextCtrl(panel, value=str(config.get("output_dir") or ""))
@@ -801,6 +820,7 @@ def _main() -> None:
             root.Add(files_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 12)
             root.Add(self.files_list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 12)
             root.Add(file_buttons, 0, wx.EXPAND | wx.ALL, 12)
+            root.Add(self.remember_files_cb, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
             root.Add(opts, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 12)
             root.Add(progress_row, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
             root.Add(wx.StaticText(panel, label=t("label.results")), 0, wx.LEFT | wx.RIGHT, 12)
@@ -831,6 +851,7 @@ def _main() -> None:
             self.language_choice.Enable(not running)
             self.country_choice.Enable(not running)
             self.advanced_btn.Enable(not running)
+            self.remember_files_cb.Enable(not running)
 
         def _collect_config(self) -> dict[str, Any]:
             ui_language_value = ui_language
@@ -851,7 +872,8 @@ def _main() -> None:
             return {
                 "version": _CONFIG_VERSION,
                 "ui_language": ui_language_value,
-                "input_paths": [str(p) for p in self._input_paths[:200]],
+                "input_paths": [str(p) for p in self._input_paths[:200]] if self._remember_file_list else [],
+                "remember_file_list": self._remember_file_list,
                 "output_dir": self.out_dir.GetValue(),
                 "interval_s": int(self.interval.GetValue()),
                 "language": language,
@@ -882,6 +904,8 @@ def _main() -> None:
                 self.SetStatusText(t("status.config_save_failed", error=str(exc)))
 
         def _load_input_paths_from_config(self) -> None:
+            if not self._remember_file_list:
+                return
             raw_list = config.get("input_paths")
             if not isinstance(raw_list, list):
                 return
@@ -905,6 +929,10 @@ def _main() -> None:
         def _on_ui_language_changed(self, _event: wx.CommandEvent) -> None:
             self._persist_config()
             wx.MessageBox(t("info.restart_required"), _APP_NAME, wx.OK | wx.ICON_INFORMATION, self)
+
+        def _on_remember_files_changed(self, _event: wx.CommandEvent) -> None:
+            self._remember_file_list = self.remember_files_cb.GetValue()
+            self._persist_config()
 
         def _on_add_files(self, _event: wx.CommandEvent) -> None:
             wildcard = (
