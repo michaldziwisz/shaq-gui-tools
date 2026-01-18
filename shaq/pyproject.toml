@@ -24,6 +24,7 @@ dependencies = [
     "rich >= 13.4,< 15.0",
     "soundcard ~= 0.4.5; platform_system == \"Windows\"",
     "shazamio >= 0.6,< 0.9",
+    "sygnalista-reporter @ git+https://github.com/michaldziwisz/sygnalista.git#subdirectory=python",
 ]
 requires-python = ">=3.10"
 

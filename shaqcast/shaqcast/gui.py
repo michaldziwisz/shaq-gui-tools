@@ -60,6 +60,57 @@ _STRINGS: dict[str, dict[str, str]] = {
     "name.refresh_devices": {"pl": "Odśwież urządzenia", "en": "Refresh devices"},
     "button.advanced": {"pl": "Ustawienia zaawansowane…", "en": "Advanced settings..."},
     "name.advanced": {"pl": "Ustawienia zaawansowane", "en": "Advanced settings"},
+    "button.report_issue": {
+        "pl": "Zgłoś błąd / sugestię…",
+        "en": "Report a bug / suggestion...",
+    },
+    "name.report_issue": {"pl": "Zgłoś błąd / sugestię", "en": "Report a bug / suggestion"},
+    "tooltip.report_issue": {
+        "pl": "Wyślij zgłoszenie na GitHub (przez sygnalistę).",
+        "en": "Send a report to GitHub (via sygnalista).",
+    },
+    "dialog.report.title": {"pl": "Zgłoś błąd / sugestię", "en": "Report a bug / suggestion"},
+    "label.report_kind": {"pl": "Typ:", "en": "Type:"},
+    "name.report_kind": {"pl": "Typ zgłoszenia", "en": "Report type"},
+    "choice.report_kind_bug": {"pl": "Błąd", "en": "Bug"},
+    "choice.report_kind_suggestion": {"pl": "Sugestia", "en": "Suggestion"},
+    "label.report_title": {"pl": "Tytuł:", "en": "Title:"},
+    "name.report_title": {"pl": "Tytuł zgłoszenia", "en": "Report title"},
+    "label.report_description": {
+        "pl": "Opis (kroki odtworzenia / co się stało):",
+        "en": "Description (steps to reproduce / what happened):",
+    },
+    "name.report_description": {"pl": "Opis zgłoszenia", "en": "Report description"},
+    "label.report_email": {"pl": "E-mail (opcjonalnie):", "en": "Email (optional):"},
+    "name.report_email": {"pl": "E-mail", "en": "Email"},
+    "help.report_email_public": {
+        "pl": "Uwaga: e-mail będzie publiczny w issue na GitHub.",
+        "en": "Note: the email will be public in the GitHub issue.",
+    },
+    "label.report_include_logs": {
+        "pl": "Dołącz dodatkowe dane (ustawienia + log aplikacji) — może zawierać dane wrażliwe.",
+        "en": "Include extra details (settings + app log) — may contain sensitive data.",
+    },
+    "name.report_include_logs": {
+        "pl": "Dołącz dodatkowe dane",
+        "en": "Include extra details",
+    },
+    "button.report_send": {"pl": "Wyślij", "en": "Send"},
+    "name.report_send": {"pl": "Wyślij zgłoszenie", "en": "Send report"},
+    "button.cancel": {"pl": "Anuluj", "en": "Cancel"},
+    "name.report_cancel": {"pl": "Anuluj", "en": "Cancel"},
+    "status.report_sending": {"pl": "Wysyłam…", "en": "Sending..."},
+    "info.report_sent": {"pl": "Wysłano zgłoszenie.\n\nIssue: {url}", "en": "Report sent.\n\nIssue: {url}"},
+    "error.report_title_required": {"pl": "Wpisz tytuł.", "en": "Enter a title."},
+    "error.report_description_required": {"pl": "Wpisz opis.", "en": "Enter a description."},
+    "error.report_failed": {
+        "pl": "Nie udało się wysłać zgłoszenia: {error}",
+        "en": "Failed to send report: {error}",
+    },
+    "error.report_not_available": {
+        "pl": "Nie mogę załadować sygnalisty: {error}",
+        "en": "Unable to load sygnalista reporter: {error}",
+    },
     "button.start": {"pl": "Start", "en": "Start"},
     "button.stop": {"pl": "Stop", "en": "Stop"},
     "label.log": {"pl": "Log:", "en": "Log:"},
@@ -428,6 +479,9 @@ class MainFrame(wx.Frame):
 
         self._advanced_btn = wx.Button(panel, label=t("button.advanced"))
         _a11y(self._advanced_btn, t("name.advanced"))
+        self._report_btn = wx.Button(panel, label=t("button.report_issue"))
+        _a11y(self._report_btn, t("name.report_issue"))
+        self._report_btn.SetToolTip(t("tooltip.report_issue"))
         self._start = wx.Button(panel, label=t("button.start"))
         _a11y(self._start, t("button.start"))
         self._stop = wx.Button(panel, label=t("button.stop"))
@@ -487,6 +541,7 @@ class MainFrame(wx.Frame):
 
         buttons = wx.BoxSizer(wx.HORIZONTAL)
         buttons.Add(self._advanced_btn, 0, wx.RIGHT, 8)
+        buttons.Add(self._report_btn, 0, wx.RIGHT, 8)
         buttons.AddStretchSpacer(1)
         buttons.Add(self._start, 0, wx.RIGHT, 8)
         buttons.Add(self._stop, 0)
@@ -505,6 +560,7 @@ class MainFrame(wx.Frame):
 
         self._refresh.Bind(wx.EVT_BUTTON, self._on_refresh)
         self._advanced_btn.Bind(wx.EVT_BUTTON, self._on_advanced)
+        self._report_btn.Bind(wx.EVT_BUTTON, self._on_report_issue)
         self._start.Bind(wx.EVT_BUTTON, self._on_start)
         self._stop.Bind(wx.EVT_BUTTON, self._on_stop)
         self._source.Bind(wx.EVT_CHOICE, self._on_source_changed)
@@ -703,6 +759,55 @@ class MainFrame(wx.Frame):
                 self.log(self._t("log.config_save_failed", error=str(exc)))
             except Exception:
                 pass
+
+    def _on_report_issue(self, _evt: wx.CommandEvent) -> None:
+        try:
+            from . import __version__ as app_version
+        except Exception:
+            app_version = None
+
+        def _diagnostics_extra() -> dict[str, Any]:
+            cfg = self._collect_config()
+            return {
+                "ui_language": cfg.get("ui_language"),
+                "source": cfg.get("source"),
+                "language": cfg.get("language"),
+                "endpoint_country": cfg.get("endpoint_country"),
+            }
+
+        def _log_payload() -> dict[str, Any]:
+            cfg = dict(self._collect_config())
+            cfg["password"] = "<redacted>"
+            presets = cfg.get("presets")
+            if isinstance(presets, list):
+                redacted_presets: list[Any] = []
+                for item in presets:
+                    if isinstance(item, dict):
+                        copy_item = dict(item)
+                        if "password" in copy_item:
+                            copy_item["password"] = "<redacted>"
+                        redacted_presets.append(copy_item)
+                    else:
+                        redacted_presets.append(item)
+                cfg["presets"] = redacted_presets
+
+            return {
+                "app": {"id": _APP_NAME, "version": app_version},
+                "config": cfg,
+                "ui_log": self._log.GetValue(),
+            }
+
+        from .sygnalista_gui import show_sygnalista_report_dialog
+
+        show_sygnalista_report_dialog(
+            self,
+            t=self._t,
+            app_name=_APP_NAME,
+            app_id=_APP_NAME,
+            app_version=app_version,
+            diagnostics_extra_provider=_diagnostics_extra,
+            log_payload_provider=_log_payload,
+        )
 
     def _on_ui_language_changed(self, _evt: wx.CommandEvent) -> None:
         self._persist_config()

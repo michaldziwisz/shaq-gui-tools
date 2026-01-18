@@ -13,6 +13,7 @@ dependencies = [
   "shazamio>=0.6,<0.9",
   "soundcard>=0.4.5",
   "wxPython>=4.2.0",
+  "sygnalista-reporter @ git+https://github.com/michaldziwisz/sygnalista.git#subdirectory=python",
 ]
 
 [project.scripts]

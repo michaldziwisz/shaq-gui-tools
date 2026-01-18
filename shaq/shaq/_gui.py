@@ -149,6 +149,57 @@ _STRINGS: dict[str, dict[str, str]] = {
         "pl": "Zmień parametry wpływające na dokładność/limity API.",
         "en": "Change parameters affecting accuracy / API limits.",
     },
+    "button.report_issue": {
+        "pl": "Zgłoś błąd / sugestię…",
+        "en": "Report a bug / suggestion...",
+    },
+    "name.report_issue": {"pl": "Zgłoś błąd / sugestię", "en": "Report a bug / suggestion"},
+    "tooltip.report_issue": {
+        "pl": "Wyślij zgłoszenie na GitHub (przez sygnalistę).",
+        "en": "Send a report to GitHub (via sygnalista).",
+    },
+    "dialog.report.title": {"pl": "Zgłoś błąd / sugestię", "en": "Report a bug / suggestion"},
+    "label.report_kind": {"pl": "Typ:", "en": "Type:"},
+    "name.report_kind": {"pl": "Typ zgłoszenia", "en": "Report type"},
+    "choice.report_kind_bug": {"pl": "Błąd", "en": "Bug"},
+    "choice.report_kind_suggestion": {"pl": "Sugestia", "en": "Suggestion"},
+    "label.report_title": {"pl": "Tytuł:", "en": "Title:"},
+    "name.report_title": {"pl": "Tytuł zgłoszenia", "en": "Report title"},
+    "label.report_description": {
+        "pl": "Opis (kroki odtworzenia / co się stało):",
+        "en": "Description (steps to reproduce / what happened):",
+    },
+    "name.report_description": {"pl": "Opis zgłoszenia", "en": "Report description"},
+    "label.report_email": {"pl": "E-mail (opcjonalnie):", "en": "Email (optional):"},
+    "name.report_email": {"pl": "E-mail", "en": "Email"},
+    "help.report_email_public": {
+        "pl": "Uwaga: e-mail będzie publiczny w issue na GitHub.",
+        "en": "Note: the email will be public in the GitHub issue.",
+    },
+    "label.report_include_logs": {
+        "pl": "Dołącz dodatkowe dane (ustawienia + log aplikacji) — może zawierać dane wrażliwe.",
+        "en": "Include extra details (settings + app log) — may contain sensitive data.",
+    },
+    "name.report_include_logs": {
+        "pl": "Dołącz dodatkowe dane",
+        "en": "Include extra details",
+    },
+    "button.report_send": {"pl": "Wyślij", "en": "Send"},
+    "name.report_send": {"pl": "Wyślij zgłoszenie", "en": "Send report"},
+    "button.cancel": {"pl": "Anuluj", "en": "Cancel"},
+    "name.report_cancel": {"pl": "Anuluj", "en": "Cancel"},
+    "status.report_sending": {"pl": "Wysyłam…", "en": "Sending..."},
+    "info.report_sent": {"pl": "Wysłano zgłoszenie.\n\nIssue: {url}", "en": "Report sent.\n\nIssue: {url}"},
+    "error.report_title_required": {"pl": "Wpisz tytuł.", "en": "Enter a title."},
+    "error.report_description_required": {"pl": "Wpisz opis.", "en": "Enter a description."},
+    "error.report_failed": {
+        "pl": "Nie udało się wysłać zgłoszenia: {error}",
+        "en": "Failed to send report: {error}",
+    },
+    "error.report_not_available": {
+        "pl": "Nie mogę załadować sygnalisty: {error}",
+        "en": "Unable to load sygnalista reporter: {error}",
+    },
     "button.start": {"pl": "Start", "en": "Start"},
     "tooltip.start": {"pl": "Rozpocznij rozpoznawanie (Start).", "en": "Start recognition."},
     "button.stop": {"pl": "Stop", "en": "Stop"},
@@ -657,6 +708,11 @@ def _main() -> None:
             self.advanced_btn.SetToolTip(t("tooltip.advanced"))
             self.advanced_btn.Bind(wx.EVT_BUTTON, self._on_advanced)
 
+            self.report_btn = wx.Button(panel, label=t("button.report_issue"))
+            self.report_btn.SetName(t("name.report_issue"))
+            self.report_btn.SetToolTip(t("tooltip.report_issue"))
+            self.report_btn.Bind(wx.EVT_BUTTON, self._on_report_issue)
+
             self.start_btn = wx.Button(panel, label=t("button.start"))
             self.start_btn.SetToolTip(t("tooltip.start"))
             self.start_btn.Bind(wx.EVT_BUTTON, self._on_start)
@@ -688,6 +744,7 @@ def _main() -> None:
 
             buttons = wx.BoxSizer(wx.HORIZONTAL)
             buttons.Add(self.advanced_btn, 0, wx.RIGHT, 8)
+            buttons.Add(self.report_btn, 0, wx.RIGHT, 8)
             buttons.AddStretchSpacer(1)
             buttons.Add(self.start_btn, 0, wx.RIGHT, 8)
             buttons.Add(self.stop_btn, 0)
@@ -827,6 +884,41 @@ def _main() -> None:
                 _save_config(self._collect_config())
             except Exception as exc:
                 self.SetStatusText(t("status.config_save_failed", error=str(exc)))
+
+        def _on_report_issue(self, _event: wx.CommandEvent) -> None:
+            try:
+                from shaq import __version__ as app_version  # type: ignore
+            except Exception:
+                app_version = None
+
+            def _diagnostics_extra() -> dict[str, Any]:
+                cfg = self._collect_config()
+                return {
+                    "ui_language": cfg.get("ui_language"),
+                    "source": cfg.get("source"),
+                    "language": cfg.get("language"),
+                    "endpoint_country": cfg.get("endpoint_country"),
+                }
+
+            def _log_payload() -> dict[str, Any]:
+                saved = [self.log_list.GetString(i) for i in range(self.log_list.GetCount())]
+                return {
+                    "app": {"id": _APP_NAME, "version": app_version},
+                    "config": self._collect_config(),
+                    "saved_recognitions": saved,
+                }
+
+            from shaq._sygnalista_gui import show_sygnalista_report_dialog
+
+            show_sygnalista_report_dialog(
+                self,
+                t=t,
+                app_name=_APP_NAME,
+                app_id=_APP_NAME,
+                app_version=app_version,
+                diagnostics_extra_provider=_diagnostics_extra,
+                log_payload_provider=_log_payload,
+            )
 
         def _on_advanced(self, _event: wx.CommandEvent) -> None:
             focus_before = wx.Window.FindFocus()
