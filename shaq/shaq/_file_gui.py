@@ -413,6 +413,20 @@ def _clamp_float(value: Any, *, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, number))
 
 
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return default
+
+
 @dataclass
 class _AdvancedSettings:
     sample_duration_s: int = int(_SAMPLE_DURATION_S)
@@ -629,7 +643,10 @@ def _main() -> None:
             self._scan_file_name: str | None = None
 
             self._input_paths: list[Path] = []
-            self._remember_file_list: bool = bool(config.get("remember_file_list", True))
+            self._remember_file_list: bool = _coerce_bool(
+                config.get("remember_file_list"),
+                default=True,
+            )
 
             adv_cfg = config.get("advanced") if isinstance(config.get("advanced"), dict) else {}
             defaults = _AdvancedSettings()
