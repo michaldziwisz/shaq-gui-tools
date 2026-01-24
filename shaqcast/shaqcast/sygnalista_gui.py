@@ -196,6 +196,10 @@ def show_sygnalista_report_dialog(
                         message = str(exc).strip() or repr(exc)
                         wx.CallAfter(self._on_send_failed, message)
                         return
+                except Exception as exc:
+                    message = str(exc).strip() or repr(exc)
+                    wx.CallAfter(self._on_send_failed, message)
+                    return
                 else:
                     wx.CallAfter(self._on_send_ok, result)
                 finally:
@@ -229,4 +233,3 @@ def show_sygnalista_report_dialog(
         dlg.ShowModal()
     finally:
         dlg.Destroy()
-
