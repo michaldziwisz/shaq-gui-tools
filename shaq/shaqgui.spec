@@ -6,7 +6,10 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=[
+        "shaq._sygnalista_gui",
+        "sygnalista_reporter",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

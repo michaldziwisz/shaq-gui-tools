@@ -7,14 +7,16 @@ import threading
 import time
 import wave
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
+from typing import Literal
 
 import numpy as np
 import soundcard as sc
 from shazamio import Serialize, Shazam
 
-from .shoutcast import update_now_playing
+from .icecast import update_now_playing as update_icecast_now_playing
+from .shoutcast import update_now_playing as update_shoutcast_now_playing
 
 
 LogFn = Callable[[str], None]
@@ -30,6 +32,8 @@ _SILENCE_DBFS_THRESHOLD = float(os.environ.get("SHAQCAST_SILENCE_DBFS_THRESHOLD"
 _MIN_REQUEST_INTERVAL_S = float(os.environ.get("SHAQCAST_MIN_REQUEST_INTERVAL_S", "10.0"))
 _MIN_REQUEST_INTERVAL_S = max(0.0, min(60.0, _MIN_REQUEST_INTERVAL_S))
 
+StreamServerType = Literal["shoutcast", "icecast"]
+
 
 @dataclass(frozen=True, slots=True)
 class StreamSettings:
@@ -39,6 +43,9 @@ class StreamSettings:
     sids: list[int]
     source: str  # "output" (loopback) or "input" (microphone)
     device_id: str
+    server_type: StreamServerType = "shoutcast"
+    icecast_user: str = "source"
+    icecast_mounts: list[str] = field(default_factory=list)
     language: str = "en-US"
     endpoint_country: str = "US"
     listen_seconds: int = 15
@@ -325,19 +332,39 @@ class StreamingSession:
                     continue
 
                 self._log(f"No match ({elapsed:.1f}s), sending fallback: {fallback}")
-                for sid in self._settings.sids:
-                    result = update_now_playing(
-                        host=self._settings.host,
-                        port=self._settings.port,
-                        password=self._settings.password,
-                        sid=sid,
-                        song=fallback,
-                    )
-                    if result.ok:
-                        self._log(f"[sid {sid}] updated ({result.method})")
-                    else:
-                        status = result.status if result.status is not None else "n/a"
-                        self._log(f"[sid {sid}] update failed ({result.method}, status={status})")
+                if self._settings.server_type == "icecast":
+                    for mount in self._settings.icecast_mounts:
+                        result = update_icecast_now_playing(
+                            host=self._settings.host,
+                            port=self._settings.port,
+                            username=self._settings.icecast_user,
+                            password=self._settings.password,
+                            mount=mount,
+                            song=fallback,
+                        )
+                        if result.ok:
+                            self._log(f"[mount {mount}] updated ({result.method})")
+                        else:
+                            status = result.status if result.status is not None else "n/a"
+                            self._log(
+                                f"[mount {mount}] update failed ({result.method}, status={status})"
+                            )
+                else:
+                    for sid in self._settings.sids:
+                        result = update_shoutcast_now_playing(
+                            host=self._settings.host,
+                            port=self._settings.port,
+                            password=self._settings.password,
+                            sid=sid,
+                            song=fallback,
+                        )
+                        if result.ok:
+                            self._log(f"[sid {sid}] updated ({result.method})")
+                        else:
+                            status = result.status if result.status is not None else "n/a"
+                            self._log(
+                                f"[sid {sid}] update failed ({result.method}, status={status})"
+                            )
 
                 self._last_track_sent = fallback
                 continue
@@ -349,18 +376,34 @@ class StreamingSession:
                 continue
 
             self._log(f"Recognized: {now_playing}")
-            for sid in self._settings.sids:
-                result = update_now_playing(
-                    host=self._settings.host,
-                    port=self._settings.port,
-                    password=self._settings.password,
-                    sid=sid,
-                    song=now_playing,
-                )
-                if result.ok:
-                    self._log(f"[sid {sid}] updated ({result.method})")
-                else:
-                    status = result.status if result.status is not None else "n/a"
-                    self._log(f"[sid {sid}] update failed ({result.method}, status={status})")
+            if self._settings.server_type == "icecast":
+                for mount in self._settings.icecast_mounts:
+                    result = update_icecast_now_playing(
+                        host=self._settings.host,
+                        port=self._settings.port,
+                        username=self._settings.icecast_user,
+                        password=self._settings.password,
+                        mount=mount,
+                        song=now_playing,
+                    )
+                    if result.ok:
+                        self._log(f"[mount {mount}] updated ({result.method})")
+                    else:
+                        status = result.status if result.status is not None else "n/a"
+                        self._log(f"[mount {mount}] update failed ({result.method}, status={status})")
+            else:
+                for sid in self._settings.sids:
+                    result = update_shoutcast_now_playing(
+                        host=self._settings.host,
+                        port=self._settings.port,
+                        password=self._settings.password,
+                        sid=sid,
+                        song=now_playing,
+                    )
+                    if result.ok:
+                        self._log(f"[sid {sid}] updated ({result.method})")
+                    else:
+                        status = result.status if result.status is not None else "n/a"
+                        self._log(f"[sid {sid}] update failed ({result.method}, status={status})")
 
             self._last_track_sent = now_playing

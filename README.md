@@ -8,7 +8,7 @@
 
 - `shaqgui` — nasłuch z **Wyjścia (loopback)** albo **Wejścia (mikrofon)** → rozpoznanie → zapis historii do pliku.
 - `shaqfilegui` — skanowanie **wielu plików** (albo całego folderu) przez próbkowanie co N sekund → zapis wyników do `.txt`.
-- `shaqcast` — nasłuch z wybranego urządzenia → rozpoznanie → aktualizacja “Now Playing” w Shoutcast (SIDy).
+- `shaqcast` — nasłuch z wybranego urządzenia → rozpoznanie → aktualizacja “Now Playing” w Shoutcast (SIDy) lub Icecast (mounty).
 
 **Konfiguracja (zapamiętywanie ustawień):**
 
@@ -40,7 +40,7 @@ Uwaga: do budowania `shaqfilegui.exe` potrzebne są `ffmpeg.exe`/`ffprobe.exe` w
 
 - `shaqgui` — listen from **Output (loopback)** or **Input (microphone)** → recognize → append to a history file.
 - `shaqfilegui` — scan **multiple files** (or a whole folder) by sampling every N seconds → write results to `.txt`.
-- `shaqcast` — listen from a selected device → recognize → update Shoutcast “Now Playing” metadata (one or more SIDs).
+- `shaqcast` — listen from a selected device → recognize → update Shoutcast “Now Playing” (one or more SIDs) or Icecast (mounts).
 
 **Config (settings persistence):**
 

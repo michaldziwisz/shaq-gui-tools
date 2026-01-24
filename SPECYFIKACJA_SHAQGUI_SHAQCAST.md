@@ -6,7 +6,7 @@ Ten dokument opisuje aktualny pipeline audio, ustawienia domyślne oraz wszystki
 
 - `shaq/dist/shaqgui.exe` — GUI: loopback (wyjście) **lub** mikrofon (wejście) → Shazam → zapis unikalnych rozpoznań do pliku.
 - `shaq/dist/shaqfilegui.exe` — GUI: plik audio → próbkowanie co N sekund → Shazam → zapis wyników do pliku `.txt` (`HH:MM:SS<TAB>ARTYSTA - TYTUŁ`).
-- `shaqcast/dist/shaqcast.exe` — GUI: loopback (wyjście) **lub** mikrofon (wejście) → Shazam → aktualizacja “Now Playing” w Shoutcast.
+- `shaqcast/dist/shaqcast.exe` — GUI: loopback (wyjście) **lub** mikrofon (wejście) → Shazam → aktualizacja “Now Playing” w Shoutcast (SIDy) lub Icecast (mounty).
 
 Wszystkie binarki są budowane przez PyInstaller jako **pojedynczy plik `.exe`**. Na “czystej” maszynie może być wymagany **Microsoft Visual C++ Redistributable 2015–2022 (x64)** (typowe dla `wxPython`/`numpy`).
 
@@ -119,7 +119,7 @@ Ustawiane w GUI:
 3. (Opcjonalnie) policz RMS dla okien długości `segment_duration_s` i wybierz top okna (domyślnie 1 okno).
 4. Wyślij wybrane okno do Shazama; jeśli match:
    - zbuduj `ARTYSTA - TYTUŁ`,
-   - wyślij do Shoutcast (dla wszystkich SID), ale tylko jeśli utwór się zmienił.
+   - wyślij do Shoutcast (dla wszystkich SID) **lub** Icecast (dla wszystkich mountów), ale tylko jeśli utwór się zmienił.
 5. Jeśli brak match:
    - jeśli w GUI ustawiono fallback tekst → wysyłaj fallback, ale tylko jeśli się zmienił,
    - w przeciwnym razie tylko loguj “No match”.
@@ -220,6 +220,6 @@ Naprawa:
 W repo są tylko testy, które mają sens bez sieci i bez zależności GUI/audio:
 
 - `shaq/tests/*`: logika WAV (`slice_wav_bytes`), formatowanie czasu (`format_hms`), regiony/języki, zapis/odczyt configu, deduplikacja historii.
-- `shaqcast/tests/*`: zapis/odczyt configu, szyfrowanie/odszyfrowanie hasła presetów, heurystyka odpowiedzi Shoutcast, regiony/języki.
+- `shaqcast/tests/*`: zapis/odczyt configu, szyfrowanie/odszyfrowanie hasła presetów, heurystyka odpowiedzi Shoutcast/Icecast, regiony/języki.
 
 CI (GitHub Actions) uruchamia `pytest` na Linux (bez instalowania ciężkich zależności typu `wxPython`).

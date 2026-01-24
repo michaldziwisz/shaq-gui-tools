@@ -43,8 +43,23 @@ _STRINGS: dict[str, dict[str, str]] = {
     "name.preset_delete": {"pl": "Usuń preset", "en": "Delete preset"},
     "label.host": {"pl": "Host:", "en": "Host:"},
     "label.port": {"pl": "Port:", "en": "Port:"},
+    "label.server_type": {"pl": "Serwer:", "en": "Server:"},
+    "name.server_type": {"pl": "Typ serwera", "en": "Server type"},
+    "choice.server_type.shoutcast": {"pl": "Shoutcast", "en": "Shoutcast"},
+    "choice.server_type.icecast": {"pl": "Icecast", "en": "Icecast"},
     "label.password": {"pl": "Hasło / authhash:", "en": "Password / authhash:"},
-    "label.sids": {"pl": "SIDy (np. 1,2,3):", "en": "SIDs (e.g. 1,2,3):"},
+    "label.sids": {
+        "pl": "SIDy (Shoutcast, np. 1,2,3):",
+        "en": "SIDs (Shoutcast, e.g. 1,2,3):",
+    },
+    "label.icecast_user": {
+        "pl": "Użytkownik (Icecast, np. source/admin):",
+        "en": "Username (Icecast, e.g. source/admin):",
+    },
+    "label.icecast_mounts": {
+        "pl": "Mounty (Icecast, np. /stream,/stream2):",
+        "en": "Mounts (Icecast, e.g. /stream,/stream2):",
+    },
     "label.listen_seconds": {"pl": "Nasłuch (sekundy):", "en": "Listen (seconds):"},
     "label.no_match_text": {
         "pl": "Tekst przy braku dopasowania (opcjonalnie):",
@@ -144,6 +159,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "error.no_device_selected": {"pl": "Nie wybrano urządzenia audio", "en": "No audio device selected"},
     "error.sid_min": {"pl": "SID musi być >= 1", "en": "SID must be >= 1"},
     "error.no_sids": {"pl": "Nie podano SIDów", "en": "No SIDs provided"},
+    "error.no_mounts": {"pl": "Nie podano mountów", "en": "No mounts provided"},
     "title.error": {"pl": "Błąd", "en": "Error"},
     "log.device_enum_failed": {
         "pl": "Nie udało się pobrać listy urządzeń audio: {error}",
@@ -428,6 +444,18 @@ class MainFrame(wx.Frame):
         self._port = wx.TextCtrl(panel, value=str(config.get("port") or "8000"))
         _a11y(self._port, t("label.port").rstrip(":"))
 
+        server_type_label = wx.StaticText(panel, label=t("label.server_type"))
+        self._server_type = wx.Choice(
+            panel,
+            choices=[t("choice.server_type.shoutcast"), t("choice.server_type.icecast")],
+        )
+        _a11y(self._server_type, t("name.server_type"))
+        server_type_cfg = str(
+            config.get("server_type") or os.environ.get("SHAQCAST_SERVER_TYPE", "shoutcast")
+        ).strip()
+        self._server_type.SetSelection(1 if server_type_cfg.lower() in {"icecast", "ice"} else 0)
+        self._server_type.Bind(wx.EVT_CHOICE, self._on_server_type_changed)
+
         password_label = wx.StaticText(panel, label=t("label.password"))
         self._password = wx.TextCtrl(panel, style=wx.TE_PASSWORD)
         _a11y(self._password, t("label.password").rstrip(":"))
@@ -436,6 +464,16 @@ class MainFrame(wx.Frame):
         sids_label = wx.StaticText(panel, label=t("label.sids"))
         self._sids = wx.TextCtrl(panel, value=str(config.get("sids") or "1"))
         _a11y(self._sids, t("label.sids").rstrip(":"))
+
+        icecast_user_label = wx.StaticText(panel, label=t("label.icecast_user"))
+        self._icecast_user = wx.TextCtrl(panel, value=str(config.get("icecast_user") or "source"))
+        _a11y(self._icecast_user, t("label.icecast_user").rstrip(":"))
+
+        icecast_mounts_label = wx.StaticText(panel, label=t("label.icecast_mounts"))
+        self._icecast_mounts = wx.TextCtrl(
+            panel, value=str(config.get("icecast_mounts") or "/stream")
+        )
+        _a11y(self._icecast_mounts, t("label.icecast_mounts").rstrip(":"))
 
         listen_label = wx.StaticText(panel, label=t("label.listen_seconds"))
         self._listen_seconds = wx.TextCtrl(panel, value=str(config.get("listen_seconds") or "15"))
@@ -512,11 +550,20 @@ class MainFrame(wx.Frame):
         grid.Add(port_label, 0, wx.ALIGN_CENTER_VERTICAL)
         grid.Add(self._port, 1, wx.EXPAND)
 
+        grid.Add(server_type_label, 0, wx.ALIGN_CENTER_VERTICAL)
+        grid.Add(self._server_type, 1, wx.EXPAND)
+
         grid.Add(password_label, 0, wx.ALIGN_CENTER_VERTICAL)
         grid.Add(self._password, 1, wx.EXPAND)
 
         grid.Add(sids_label, 0, wx.ALIGN_CENTER_VERTICAL)
         grid.Add(self._sids, 1, wx.EXPAND)
+
+        grid.Add(icecast_user_label, 0, wx.ALIGN_CENTER_VERTICAL)
+        grid.Add(self._icecast_user, 1, wx.EXPAND)
+
+        grid.Add(icecast_mounts_label, 0, wx.ALIGN_CENTER_VERTICAL)
+        grid.Add(self._icecast_mounts, 1, wx.EXPAND)
 
         grid.Add(listen_label, 0, wx.ALIGN_CENTER_VERTICAL)
         grid.Add(self._listen_seconds, 1, wx.EXPAND)
@@ -573,6 +620,7 @@ class MainFrame(wx.Frame):
         self._refresh_presets(select_name=self._selected_preset_name)
         if self._selected_preset_name:
             self._apply_preset(self._selected_preset_name)
+        self._apply_server_type_ui()
 
     def log(self, message: str) -> None:
         self._log.AppendText(message + "\n")
@@ -620,6 +668,32 @@ class MainFrame(wx.Frame):
             raise ValueError(self._t("error.no_sids"))
         return sids
 
+    def _server_type_value(self) -> str:
+        return "icecast" if self._server_type.GetSelection() == 1 else "shoutcast"
+
+    def _apply_server_type_ui(self) -> None:
+        is_icecast = self._server_type_value() == "icecast"
+        self._sids.Enable(not is_icecast)
+        self._icecast_user.Enable(is_icecast)
+        self._icecast_mounts.Enable(is_icecast)
+
+    def _on_server_type_changed(self, _evt: wx.CommandEvent) -> None:
+        self._apply_server_type_ui()
+        self._persist_config()
+
+    def _parse_icecast_mounts(self) -> list[str]:
+        raw = self._icecast_mounts.GetValue().strip()
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+        mounts: list[str] = []
+        for part in parts:
+            mount = part
+            if not mount.startswith("/"):
+                mount = "/" + mount
+            mounts.append(mount)
+        if not mounts:
+            raise ValueError(self._t("error.no_mounts"))
+        return mounts
+
     def _selected_device_id(self) -> str:
         idx = self._device.GetSelection()
         if idx < 0 or idx >= len(self._device_choices):
@@ -661,12 +735,17 @@ class MainFrame(wx.Frame):
         if preset is None:
             return
 
+        server_type = str(preset.get("server_type") or "shoutcast").strip().lower()
+        self._server_type.SetSelection(1 if server_type in {"icecast", "ice"} else 0)
         self._host.SetValue(str(preset.get("host") or "127.0.0.1"))
         self._port.SetValue(str(preset.get("port") or "8000"))
         self._sids.SetValue(str(preset.get("sids") or "1"))
+        self._icecast_user.SetValue(str(preset.get("icecast_user") or "source"))
+        self._icecast_mounts.SetValue(str(preset.get("icecast_mounts") or "/stream"))
         self._no_match_text.SetValue(str(preset.get("no_match_text") or ""))
         self._password.SetValue(decrypt_secret(str(preset.get("password") or "")))
         self._selected_preset_name = name
+        self._apply_server_type_ui()
         self._persist_config()
 
     def _collect_config(self) -> dict[str, Any]:
@@ -726,10 +805,13 @@ class MainFrame(wx.Frame):
         return {
             "version": config_version(),
             "ui_language": ui_language,
+            "server_type": self._server_type_value(),
             "host": self._host.GetValue().strip(),
             "port": port_val,
             "password": encrypt_secret(self._password.GetValue()),
             "sids": self._sids.GetValue().strip(),
+            "icecast_user": self._icecast_user.GetValue().strip(),
+            "icecast_mounts": self._icecast_mounts.GetValue().strip(),
             "listen_seconds": listen_val,
             "no_match_text": self._no_match_text.GetValue(),
             "language": language,
@@ -797,7 +879,16 @@ class MainFrame(wx.Frame):
                 "ui_log": self._log.GetValue(),
             }
 
-        from .sygnalista_gui import show_sygnalista_report_dialog
+        try:
+            from .sygnalista_gui import show_sygnalista_report_dialog
+        except Exception as exc:
+            wx.MessageBox(
+                self._t("error.report_not_available", error=str(exc)),
+                _APP_NAME,
+                wx.OK | wx.ICON_ERROR,
+                self,
+            )
+            return
 
         show_sygnalista_report_dialog(
             self,
@@ -858,10 +949,13 @@ class MainFrame(wx.Frame):
 
         preset = {
             "name": name,
+            "server_type": self._server_type_value(),
             "host": self._host.GetValue().strip(),
             "port": self._port.GetValue().strip(),
             "password": encrypt_secret(self._password.GetValue()),
             "sids": self._sids.GetValue().strip(),
+            "icecast_user": self._icecast_user.GetValue().strip(),
+            "icecast_mounts": self._icecast_mounts.GetValue().strip(),
             "no_match_text": self._no_match_text.GetValue(),
         }
 
@@ -1132,13 +1226,25 @@ class MainFrame(wx.Frame):
                 raise ValueError(self._t("error.choose_shazam_country"))
             endpoint_country = self._country_codes[country_idx]
 
+            server_type = self._server_type_value()
+            sids: list[int] = []
+            icecast_mounts: list[str] = []
+            icecast_user = (self._icecast_user.GetValue() or "").strip() or "source"
+            if server_type == "icecast":
+                icecast_mounts = self._parse_icecast_mounts()
+            else:
+                sids = self._parse_sids()
+
             settings = StreamSettings(
                 host=self._host.GetValue().strip(),
                 port=port,
                 password=self._password.GetValue(),
-                sids=self._parse_sids(),
+                sids=sids,
                 source=source,
                 device_id=self._selected_device_id(),
+                server_type=server_type,
+                icecast_user=icecast_user,
+                icecast_mounts=icecast_mounts,
                 language=language,
                 endpoint_country=endpoint_country,
                 listen_seconds=listen_seconds,

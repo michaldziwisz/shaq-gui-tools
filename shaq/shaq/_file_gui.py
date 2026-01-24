@@ -999,7 +999,16 @@ def _main() -> None:
                     "ui_log": self.log.GetValue(),
                 }
 
-            from shaq._sygnalista_gui import show_sygnalista_report_dialog
+            try:
+                from shaq._sygnalista_gui import show_sygnalista_report_dialog
+            except Exception as exc:
+                wx.MessageBox(
+                    t("error.report_not_available", error=str(exc)),
+                    _APP_NAME,
+                    wx.OK | wx.ICON_ERROR,
+                    self,
+                )
+                return
 
             show_sygnalista_report_dialog(
                 self,
