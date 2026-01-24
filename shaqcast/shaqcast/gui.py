@@ -22,6 +22,12 @@ from .shazam_regions import (
 )
 from .streamer import StreamSettings, StreamingSession
 
+_SYGNALISTA_GUI_IMPORT_ERROR: str | None = None
+try:
+    from . import sygnalista_gui as _sygnalista_gui
+except Exception as exc:  # pragma: no cover - optional at runtime (and for PyInstaller analysis)
+    _SYGNALISTA_GUI_IMPORT_ERROR = str(exc)
+    _sygnalista_gui = None  # type: ignore[assignment]
 
 _APP_NAME = "shaqcast"
 
@@ -879,18 +885,19 @@ class MainFrame(wx.Frame):
                 "ui_log": self._log.GetValue(),
             }
 
-        try:
-            from .sygnalista_gui import show_sygnalista_report_dialog
-        except Exception as exc:
+        if _sygnalista_gui is None:
             wx.MessageBox(
-                self._t("error.report_not_available", error=str(exc)),
+                self._t(
+                    "error.report_not_available",
+                    error=_SYGNALISTA_GUI_IMPORT_ERROR or "sygnalista_gui unavailable",
+                ),
                 _APP_NAME,
                 wx.OK | wx.ICON_ERROR,
                 self,
             )
             return
 
-        show_sygnalista_report_dialog(
+        _sygnalista_gui.show_sygnalista_report_dialog(
             self,
             t=self._t,
             app_name=_APP_NAME,

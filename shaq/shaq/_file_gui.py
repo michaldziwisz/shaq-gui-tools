@@ -39,6 +39,13 @@ from shaq._shazam_regions import (
     language_codes,
 )
 
+_SYGNALISTA_GUI_IMPORT_ERROR: str | None = None
+try:
+    import shaq._sygnalista_gui as _sygnalista_gui
+except Exception as exc:  # pragma: no cover - optional at runtime (and for PyInstaller analysis)
+    _SYGNALISTA_GUI_IMPORT_ERROR = str(exc)
+    _sygnalista_gui = None  # type: ignore[assignment]
+
 _APP_NAME = "shaqfilegui"
 _CONFIG_VERSION = 1
 _SHAZAM_SEGMENT_DURATION_S = int(os.environ.get("SHAQ_SHAZAM_SEGMENT_SECONDS", "12"))
@@ -999,18 +1006,19 @@ def _main() -> None:
                     "ui_log": self.log.GetValue(),
                 }
 
-            try:
-                from shaq._sygnalista_gui import show_sygnalista_report_dialog
-            except Exception as exc:
+            if _sygnalista_gui is None:
                 wx.MessageBox(
-                    t("error.report_not_available", error=str(exc)),
+                    t(
+                        "error.report_not_available",
+                        error=_SYGNALISTA_GUI_IMPORT_ERROR or "sygnalista_gui unavailable",
+                    ),
                     _APP_NAME,
                     wx.OK | wx.ICON_ERROR,
                     self,
                 )
                 return
 
-            show_sygnalista_report_dialog(
+            _sygnalista_gui.show_sygnalista_report_dialog(
                 self,
                 t=t,
                 app_name=_APP_NAME,

@@ -16,6 +16,14 @@ from typing import Any
 
 from shaq._i18n import I18n, UI_LANGUAGE_CHOICES, ui_language_from_config
 from shaq._file_scan import slice_wav_bytes
+
+_SYGNALISTA_GUI_IMPORT_ERROR: str | None = None
+try:
+    import shaq._sygnalista_gui as _sygnalista_gui
+except Exception as exc:  # pragma: no cover - optional at runtime (and for PyInstaller analysis)
+    _SYGNALISTA_GUI_IMPORT_ERROR = str(exc)
+    _sygnalista_gui = None  # type: ignore[assignment]
+
 from shaq._shazam_regions import (
     SUPPORTED_ENDPOINT_COUNTRIES,
     SUPPORTED_LANGUAGES,
@@ -908,18 +916,19 @@ def _main() -> None:
                     "saved_recognitions": saved,
                 }
 
-            try:
-                from shaq._sygnalista_gui import show_sygnalista_report_dialog
-            except Exception as exc:
+            if _sygnalista_gui is None:
                 wx.MessageBox(
-                    t("error.report_not_available", error=str(exc)),
+                    t(
+                        "error.report_not_available",
+                        error=_SYGNALISTA_GUI_IMPORT_ERROR or "sygnalista_gui unavailable",
+                    ),
                     _APP_NAME,
                     wx.OK | wx.ICON_ERROR,
                     self,
                 )
                 return
 
-            show_sygnalista_report_dialog(
+            _sygnalista_gui.show_sygnalista_report_dialog(
                 self,
                 t=t,
                 app_name=_APP_NAME,
