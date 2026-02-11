@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import urllib.request
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Callable, Literal
@@ -21,6 +22,31 @@ def _write_temp_json(payload: Any) -> Path:
     with NamedTemporaryFile("w", delete=False, encoding="utf-8", suffix=".json") as tmp:
         json.dump(payload, tmp, ensure_ascii=False, indent=2, sort_keys=True)
         return Path(tmp.name)
+
+
+def _sygnalista_user_agent(app_id: str, app_version: str | None) -> str:
+    app_id = (app_id or "").strip() or "app"
+    app_version = (app_version or "").strip()
+    if app_version:
+        return f"{app_id}/{app_version} (sygnalista)"
+    return f"{app_id} (sygnalista)"
+
+
+def _install_urllib_user_agent(user_agent: str) -> None:
+    """
+    sygnalista uses urllib under the hood. Cloudflare may block the default
+    `Python-urllib/<version>` UA with HTTP 403 (e.g. error code 1010).
+    """
+    user_agent = (user_agent or "").strip()
+    if not user_agent:
+        return
+    try:
+        opener = urllib.request.build_opener()
+        opener.addheaders = [("User-agent", user_agent)]
+        urllib.request.install_opener(opener)
+    except Exception:
+        # Best-effort; fall back to urllib defaults.
+        return
 
 
 def show_sygnalista_report_dialog(
@@ -168,34 +194,39 @@ def show_sygnalista_report_dialog(
                         temp_payload_path = _write_temp_json(payload)
                         log_path = str(temp_payload_path)
 
+                    prev_opener = getattr(urllib.request, "_opener", None)
                     try:
-                        result = send_report(
-                            base_url=sygnalista_base_url(),
-                            app_id=app_id,
-                            app_version=app_version,
-                            kind=kind,
-                            title=title,
-                            description=description,
-                            email=email,
-                            log_path=log_path,
-                            diagnostics_extra=diagnostics_extra,
-                        )
-                    except ReportError as exc:
-                        message = str(exc).strip() or "Report failed"
-                        status = getattr(exc, "status", None)
-                        payload = getattr(exc, "payload", None)
-                        if isinstance(payload, dict):
-                            err = payload.get("error")
-                            if isinstance(err, dict) and isinstance(err.get("message"), str):
-                                message = err["message"]
-                        if status:
-                            message = f"HTTP {status}: {message}"
-                        wx.CallAfter(self._on_send_failed, message)
-                        return
-                    except Exception as exc:
-                        message = str(exc).strip() or repr(exc)
-                        wx.CallAfter(self._on_send_failed, message)
-                        return
+                        try:
+                            _install_urllib_user_agent(_sygnalista_user_agent(app_id, app_version))
+                            result = send_report(
+                                base_url=sygnalista_base_url(),
+                                app_id=app_id,
+                                app_version=app_version,
+                                kind=kind,
+                                title=title,
+                                description=description,
+                                email=email,
+                                log_path=log_path,
+                                diagnostics_extra=diagnostics_extra,
+                            )
+                        except ReportError as exc:
+                            message = str(exc).strip() or "Report failed"
+                            status = getattr(exc, "status", None)
+                            payload = getattr(exc, "payload", None)
+                            if isinstance(payload, dict):
+                                err = payload.get("error")
+                                if isinstance(err, dict) and isinstance(err.get("message"), str):
+                                    message = err["message"]
+                            if status:
+                                message = f"HTTP {status}: {message}"
+                            wx.CallAfter(self._on_send_failed, message)
+                            return
+                        except Exception as exc:
+                            message = str(exc).strip() or repr(exc)
+                            wx.CallAfter(self._on_send_failed, message)
+                            return
+                    finally:
+                        urllib.request.install_opener(prev_opener)
                 except Exception as exc:
                     message = str(exc).strip() or repr(exc)
                     wx.CallAfter(self._on_send_failed, message)
