@@ -15,6 +15,7 @@ import numpy as np
 import soundcard as sc
 from shazamio import Serialize, Shazam
 
+from ._soundcard_compat import patch_soundcard_numpy_fromstring
 from .icecast import update_now_playing as update_icecast_now_playing
 from .shoutcast import update_now_playing as update_shoutcast_now_playing
 
@@ -221,6 +222,8 @@ class StreamingSession:
         self._thread.join(timeout=10.0)
 
     def _run(self) -> None:
+        patch_soundcard_numpy_fromstring()
+
         include_loopback = self._settings.source != "input"
         label = "loopback" if include_loopback else "microphone"
 
