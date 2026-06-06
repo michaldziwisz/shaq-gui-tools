@@ -36,6 +36,24 @@ _MIN_REQUEST_INTERVAL_S = max(0.0, min(60.0, _MIN_REQUEST_INTERVAL_S))
 StreamServerType = Literal["shoutcast", "icecast"]
 
 
+def _compact_response_body(body: str, *, limit: int = 180) -> str:
+    text = " ".join((body or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def _update_failed_log(prefix: str, result: object) -> str:
+    status = getattr(result, "status", None)
+    status_text = status if status is not None else "n/a"
+    method = getattr(result, "method", "unknown")
+    message = f"{prefix} update failed ({method}, status={status_text})"
+    body = _compact_response_body(str(getattr(result, "body", "") or ""))
+    if body:
+        message = f"{message}: {body}"
+    return message
+
+
 @dataclass(frozen=True, slots=True)
 class StreamSettings:
     host: str
@@ -348,10 +366,7 @@ class StreamingSession:
                         if result.ok:
                             self._log(f"[mount {mount}] updated ({result.method})")
                         else:
-                            status = result.status if result.status is not None else "n/a"
-                            self._log(
-                                f"[mount {mount}] update failed ({result.method}, status={status})"
-                            )
+                            self._log(_update_failed_log(f"[mount {mount}]", result))
                 else:
                     for sid in self._settings.sids:
                         result = update_shoutcast_now_playing(
@@ -364,10 +379,7 @@ class StreamingSession:
                         if result.ok:
                             self._log(f"[sid {sid}] updated ({result.method})")
                         else:
-                            status = result.status if result.status is not None else "n/a"
-                            self._log(
-                                f"[sid {sid}] update failed ({result.method}, status={status})"
-                            )
+                            self._log(_update_failed_log(f"[sid {sid}]", result))
 
                 self._last_track_sent = fallback
                 continue
@@ -392,8 +404,7 @@ class StreamingSession:
                     if result.ok:
                         self._log(f"[mount {mount}] updated ({result.method})")
                     else:
-                        status = result.status if result.status is not None else "n/a"
-                        self._log(f"[mount {mount}] update failed ({result.method}, status={status})")
+                        self._log(_update_failed_log(f"[mount {mount}]", result))
             else:
                 for sid in self._settings.sids:
                     result = update_shoutcast_now_playing(
@@ -406,7 +417,6 @@ class StreamingSession:
                     if result.ok:
                         self._log(f"[sid {sid}] updated ({result.method})")
                     else:
-                        status = result.status if result.status is not None else "n/a"
-                        self._log(f"[sid {sid}] update failed ({result.method}, status={status})")
+                        self._log(_update_failed_log(f"[sid {sid}]", result))
 
             self._last_track_sent = now_playing

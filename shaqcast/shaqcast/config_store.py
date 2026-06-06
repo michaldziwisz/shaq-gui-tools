@@ -28,7 +28,7 @@ def config_path() -> Path:
 def load_config() -> dict[str, Any]:
     path = config_path()
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8-sig")
     except OSError:
         return {}
     try:

@@ -10,6 +10,7 @@ import wx
 
 from .audio import default_microphone_id, default_speaker_id, list_microphones, list_speakers
 from .config_store import config_version, decrypt_secret, encrypt_secret, load_config, save_config
+from .icecast import parse_mounts
 from .i18n import I18n, UI_LANGUAGE_CHOICES, ui_language_from_config
 from .shazam_regions import (
     SUPPORTED_ENDPOINT_COUNTRIES,
@@ -688,14 +689,7 @@ class MainFrame(wx.Frame):
         self._persist_config()
 
     def _parse_icecast_mounts(self) -> list[str]:
-        raw = self._icecast_mounts.GetValue().strip()
-        parts = [p.strip() for p in raw.split(",") if p.strip()]
-        mounts: list[str] = []
-        for part in parts:
-            mount = part
-            if not mount.startswith("/"):
-                mount = "/" + mount
-            mounts.append(mount)
+        mounts = parse_mounts(self._icecast_mounts.GetValue())
         if not mounts:
             raise ValueError(self._t("error.no_mounts"))
         return mounts

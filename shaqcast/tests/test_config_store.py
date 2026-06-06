@@ -22,6 +22,16 @@ def test_config_roundtrip(monkeypatch, tmp_path) -> None:
     assert config_path().name == "config.json"
 
 
+def test_config_loads_utf8_bom(monkeypatch, tmp_path) -> None:
+    _set_test_config_dir(monkeypatch, tmp_path)
+
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('\ufeff{"title": "Zażółć gęślą jaźń"}', encoding="utf-8")
+
+    assert load_config() == {"title": "Zażółć gęślą jaźń"}
+
+
 def test_encrypt_decrypt_secret_roundtrip() -> None:
     secret = "p@ssw0rd!"
     token = encrypt_secret(secret)
