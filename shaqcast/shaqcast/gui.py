@@ -21,6 +21,12 @@ from .shazam_regions import (
     language_choice_strings,
     language_codes,
 )
+from .startup import (
+    AutostartError,
+    is_autostart_enabled,
+    is_autostart_supported,
+    set_autostart_enabled,
+)
 from .streamer import StreamSettings, StreamingSession
 
 _SYGNALISTA_GUI_IMPORT_ERROR: str | None = None
@@ -38,6 +44,22 @@ _STRINGS: dict[str, dict[str, str]] = {
     "tooltip.ui_language": {
         "pl": "Zmień język interfejsu (wymaga restartu aplikacji).",
         "en": "Change the interface language (requires app restart).",
+    },
+    "label.start_with_windows": {
+        "pl": "Uruchamiaj Shaqcast z systemem",
+        "en": "Start Shaqcast with Windows",
+    },
+    "name.start_with_windows": {
+        "pl": "Uruchamiaj Shaqcast z systemem",
+        "en": "Start Shaqcast with Windows",
+    },
+    "tooltip.start_with_windows": {
+        "pl": "Dodaje lub usuwa skrót Shaqcasta w folderze Autostart bieżącego użytkownika.",
+        "en": "Adds or removes a Shaqcast shortcut in the current user's Startup folder.",
+    },
+    "tooltip.start_with_windows_unsupported": {
+        "pl": "Autostart jest dostępny tylko w Windows.",
+        "en": "Autostart is only available on Windows.",
     },
     "info.restart_required": {
         "pl": "Zapisano język. Uruchom ponownie aplikację, aby zastosować zmianę.",
@@ -178,6 +200,12 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "log.listening_started": {"pl": "Nasłuch uruchomiony.", "en": "Listening started."},
     "log.listening_stopped": {"pl": "Nasłuch zatrzymany.", "en": "Listening stopped."},
+    "log.autostart_enabled": {"pl": "Autostart włączony.", "en": "Autostart enabled."},
+    "log.autostart_disabled": {"pl": "Autostart wyłączony.", "en": "Autostart disabled."},
+    "log.autostart_failed": {
+        "pl": "Nie udało się zmienić autostartu: {error}",
+        "en": "Failed to change autostart: {error}",
+    },
 }
 
 try:
@@ -435,6 +463,23 @@ class MainFrame(wx.Frame):
         self._ui_language_choice.SetSelection(0 if ui_language == "pl" else 1)
         self._ui_language_choice.Bind(wx.EVT_CHOICE, self._on_ui_language_changed)
 
+        start_with_windows = bool(config.get("start_with_windows"))
+        self._autostart_supported = is_autostart_supported()
+        if self._autostart_supported:
+            try:
+                start_with_windows = is_autostart_enabled()
+            except Exception:
+                pass
+
+        self._start_with_windows = wx.CheckBox(panel, label=t("label.start_with_windows"))
+        _a11y(self._start_with_windows, t("name.start_with_windows"))
+        self._start_with_windows.SetValue(start_with_windows)
+        if self._autostart_supported:
+            self._start_with_windows.SetToolTip(t("tooltip.start_with_windows"))
+        else:
+            self._start_with_windows.Disable()
+            self._start_with_windows.SetToolTip(t("tooltip.start_with_windows_unsupported"))
+
         preset_label = wx.StaticText(panel, label=t("label.preset"))
         self._preset = wx.Choice(panel)
         _a11y(self._preset, t("label.preset").rstrip(":"))
@@ -551,6 +596,9 @@ class MainFrame(wx.Frame):
         grid.Add(ui_lang_label, 0, wx.ALIGN_CENTER_VERTICAL)
         grid.Add(self._ui_language_choice, 1, wx.EXPAND)
 
+        grid.AddSpacer(0)
+        grid.Add(self._start_with_windows, 1, wx.EXPAND)
+
         grid.Add(host_label, 0, wx.ALIGN_CENTER_VERTICAL)
         grid.Add(self._host, 1, wx.EXPAND)
 
@@ -615,6 +663,7 @@ class MainFrame(wx.Frame):
         self._refresh.Bind(wx.EVT_BUTTON, self._on_refresh)
         self._advanced_btn.Bind(wx.EVT_BUTTON, self._on_advanced)
         self._report_btn.Bind(wx.EVT_BUTTON, self._on_report_issue)
+        self._start_with_windows.Bind(wx.EVT_CHECKBOX, self._on_start_with_windows_changed)
         self._start.Bind(wx.EVT_BUTTON, self._on_start)
         self._stop.Bind(wx.EVT_BUTTON, self._on_stop)
         self._source.Bind(wx.EVT_CHOICE, self._on_source_changed)
@@ -805,6 +854,7 @@ class MainFrame(wx.Frame):
         return {
             "version": config_version(),
             "ui_language": ui_language,
+            "start_with_windows": bool(self._start_with_windows.GetValue()),
             "server_type": self._server_type_value(),
             "host": self._host.GetValue().strip(),
             "port": port_val,
@@ -908,6 +958,20 @@ class MainFrame(wx.Frame):
             _APP_NAME,
             wx.OK | wx.ICON_INFORMATION,
             self,
+        )
+
+    def _on_start_with_windows_changed(self, _evt: wx.CommandEvent) -> None:
+        enabled = bool(self._start_with_windows.GetValue())
+        try:
+            set_autostart_enabled(enabled)
+        except (AutostartError, OSError) as exc:
+            self._start_with_windows.SetValue(not enabled)
+            self.log(self._t("log.autostart_failed", error=str(exc)))
+            return
+
+        self._persist_config()
+        self.log(
+            self._t("log.autostart_enabled" if enabled else "log.autostart_disabled")
         )
 
     def _on_device_changed(self, _evt: wx.CommandEvent) -> None:
