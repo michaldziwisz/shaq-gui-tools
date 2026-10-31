@@ -15,7 +15,18 @@ from tempfile import NamedTemporaryFile
 from typing import Any
 
 from shaq._i18n import I18n, UI_LANGUAGE_CHOICES, ui_language_from_config
+from shaq._announcements import RecognitionAnnouncer
 from shaq._file_scan import slice_wav_bytes
+from shaq._process_audio import ProcessTarget, record_process_wav
+from shaq._process_picker import ProcessPicker
+from shaq._radio_panel import RadioPanel
+from shaq._radio_stream import RadioStream
+from shaq._recognition import (
+    MAX_SIGNATURE_SECONDS,
+    create_recognizer,
+    run_interruptible,
+    signature_seconds,
+)
 
 _SYGNALISTA_GUI_IMPORT_ERROR: str | None = None
 try:
@@ -37,9 +48,9 @@ from shaq._shazam_regions import (
 _APP_NAME = "shaqgui"
 
 _SHAZAM_SEGMENT_DURATION_S = int(os.environ.get("SHAQGUI_SHAZAM_SEGMENT_SECONDS", "12"))
-_SHAZAM_SEGMENT_DURATION_S = max(5, min(60, _SHAZAM_SEGMENT_DURATION_S))
+_SHAZAM_SEGMENT_DURATION_S = signature_seconds(max(5, _SHAZAM_SEGMENT_DURATION_S))
 
-_SAMPLE_DURATION_S = int(os.environ.get("SHAQGUI_SAMPLE_SECONDS", "15"))
+_SAMPLE_DURATION_S = int(os.environ.get("SHAQGUI_SAMPLE_SECONDS", "12"))
 _SAMPLE_DURATION_S = max(_SHAZAM_SEGMENT_DURATION_S, min(60, _SAMPLE_DURATION_S))
 
 _MAX_WINDOWS_PER_SAMPLE = max(
@@ -217,6 +228,23 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Failed to save config: {error}",
     },
     "dialog.advanced.title": {"pl": "Ustawienia zaawansowane", "en": "Advanced settings"},
+    "adv.announce_recognitions": {
+        "pl": "Odczytuj nowe rozpoznania, gdy jestem na liście wyników",
+        "en": "Announce new recognitions while I am on the results list",
+    },
+    "tooltip.announce_recognitions": {
+        "pl": "Czyta wykonawcę i tytuł przez aktywny czytnik ekranu. Nie zmienia zaznaczenia ani nie powtarza ciągle tego samego utworu. Domyślnie wyłączone.",
+        "en": "Reads the artist and title through the active screen reader, without moving the selection or repeating the same song. Off by default.",
+    },
+    "button.test_announcement": {"pl": "Testuj odczyt", "en": "Test announcement"},
+    "announcement.test": {
+        "pl": "Test odczytu rozpoznań. Wykonawca, tytuł utworu.",
+        "en": "Recognition announcement test. Artist, song title.",
+    },
+    "announcement.failed": {
+        "pl": "Nie udało się przekazać tekstu do czytnika ekranu. Sprawdź, czy czytnik jest uruchomiony, i spróbuj ponownie.",
+        "en": "Could not send the text to a screen reader. Check that your screen reader is running and try again.",
+    },
     "adv.sample_seconds": {"pl": "Długość próbki (sek):", "en": "Sample length (sec):"},
     "name.sample_seconds": {"pl": "Długość próbki (sekundy)", "en": "Sample length (seconds)"},
     "adv.segment_seconds": {"pl": "Długość podpisu (sek):", "en": "Signature length (sec):"},
@@ -326,6 +354,7 @@ class _AdvancedSettings:
     max_windows_per_sample: int
     window_step_seconds: int
     silence_dbfs_threshold: float
+    announce_recognitions: bool = False
 
 
 def _default_advanced_settings() -> _AdvancedSettings:
@@ -569,7 +598,7 @@ def _main() -> None:
     patch_soundcard_numpy_fromstring()
 
     try:
-        from shazamio import Serialize, Shazam  # type: ignore
+        from shazamio import Serialize  # type: ignore
     except Exception as exc:
         raise RuntimeError(f"Nie mogę załadować shazamio: {exc}") from exc
 
@@ -606,6 +635,7 @@ def _main() -> None:
             self._events: Queue[tuple[str, str]] = Queue()
             self._stop_event = threading.Event()
             self._worker: threading.Thread | None = None
+            self._announcer = RecognitionAnnouncer()
 
             self._device_id_output = str(config.get("device_id_output") or "").strip() or None
             self._device_id_input = str(config.get("device_id_input") or "").strip() or None
@@ -613,7 +643,8 @@ def _main() -> None:
             adv_cfg = config.get("advanced") if isinstance(config.get("advanced"), dict) else {}
             defaults = _default_advanced_settings()
             segment_seconds = _clamp_int(
-                adv_cfg.get("segment_seconds", defaults.segment_seconds), minimum=5, maximum=60
+                adv_cfg.get("segment_seconds", defaults.segment_seconds),
+                minimum=5, maximum=MAX_SIGNATURE_SECONDS
             )
             sample_seconds = _clamp_int(
                 adv_cfg.get("sample_seconds", defaults.sample_seconds), minimum=5, maximum=60
@@ -647,6 +678,7 @@ def _main() -> None:
                 max_windows_per_sample=max_windows,
                 window_step_seconds=window_step,
                 silence_dbfs_threshold=silence_dbfs,
+                announce_recognitions=adv_cfg.get("announce_recognitions") is True,
             )
 
             self._ui_language_codes = [code for code, _label in UI_LANGUAGE_CHOICES]
@@ -666,21 +698,44 @@ def _main() -> None:
                 choices=[
                     t("choice.audio_source.output"),
                     t("choice.audio_source.input"),
+                    "Program (wybrany proces)",
+                    "Strumień radiowy (cichy nasłuch)",
                 ],
             )
             self.source_choice.SetName(t("name.audio_source"))
             self.source_choice.Bind(wx.EVT_CHOICE, self._on_source_changed)
             source_cfg = str(config.get("source") or "").strip().lower()
-            if source_cfg in {"input", "mic", "microphone"}:
+            if source_cfg == "radio":
+                self.source_choice.SetSelection(3)
+            elif source_cfg == "process":
+                self.source_choice.SetSelection(2)
+            elif source_cfg in {"input", "mic", "microphone"}:
                 self.source_choice.SetSelection(1)
             else:
                 self.source_choice.SetSelection(0)
 
             device_label = wx.StaticText(panel, label=t("label.device"))
+            self._device_label = device_label
             self.device_choice = wx.Choice(panel, choices=[])
             self.device_choice.SetName(t("name.device"))
             self.device_choice.Bind(wx.EVT_CHOICE, self._on_device_changed)
             self._devices: list[_AudioDevice] = []
+            self.process_refresh_btn = wx.Button(panel, label="Odśwież programy")
+            self.process_refresh_btn.Bind(
+                wx.EVT_BUTTON, lambda _event: self._process_picker.refresh(force=True)
+            )
+            self.process_browse_btn = wx.Button(panel, label="Wskaż plik EXE…")
+            self.process_browse_btn.Bind(
+                wx.EVT_BUTTON, lambda _event: self._process_picker.browse()
+            )
+            self._process_picker = ProcessPicker(
+                self, self.device_choice, config.get("process_target"),
+                changed=self._persist_config, status=self.SetStatusText,
+            )
+            self._radio = RadioPanel(
+                panel, config.get("radio"), changed=self._persist_config, status=self.SetStatusText,
+                announce=lambda message: self._announcer.speaker.speak(message, int(self.GetHandle())),
+            )
             self._populate_devices()
 
             language_label = wx.StaticText(panel, label=t("label.shazam_language"))
@@ -711,6 +766,7 @@ def _main() -> None:
 
             self.log_list = wx.ListBox(panel)
             self.log_list.SetName(t("name.saved_recognitions"))
+            self.log_list.SetMinSize((-1, 180))
 
             self.advanced_btn = wx.Button(panel, label=t("button.advanced"))
             self.advanced_btn.SetToolTip(t("tooltip.advanced"))
@@ -739,7 +795,10 @@ def _main() -> None:
             grid.Add((1, 1))
             grid.Add(device_label, 0, wx.ALIGN_CENTER_VERTICAL)
             grid.Add(self.device_choice, 1, wx.EXPAND)
-            grid.Add((1, 1))
+            process_buttons = wx.BoxSizer(wx.HORIZONTAL)
+            process_buttons.Add(self.process_refresh_btn, 0, wx.RIGHT, 4)
+            process_buttons.Add(self.process_browse_btn, 0)
+            grid.Add(process_buttons, 0)
             grid.Add(language_label, 0, wx.ALIGN_CENTER_VERTICAL)
             grid.Add(self.language_choice, 1, wx.EXPAND)
             grid.Add((1, 1))
@@ -759,6 +818,7 @@ def _main() -> None:
 
             layout = wx.BoxSizer(wx.VERTICAL)
             layout.Add(grid, 0, wx.EXPAND | wx.ALL, 12)
+            layout.Add(self._radio.panel, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
             layout.Add(
                 wx.StaticText(panel, label=t("label.saved_unique")),
                 0,
@@ -768,12 +828,15 @@ def _main() -> None:
             layout.Add(self.log_list, 1, wx.EXPAND | wx.ALL, 12)
             layout.Add(buttons, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
             panel.SetSizer(layout)
+            layout.SetSizeHints(self)
 
             self._timer = wx.Timer(self)
             self.Bind(wx.EVT_TIMER, self._on_timer, self._timer)
             self._timer.Start(150)
 
             self.Bind(wx.EVT_CLOSE, self._on_close)
+            if self.source_choice.GetSelection() == 2:
+                wx.CallAfter(self._process_picker.startup_notice)
 
         def _set_running(self, running: bool) -> None:
             self.start_btn.Enable(not running)
@@ -781,13 +844,32 @@ def _main() -> None:
             self.ui_language_choice.Enable(not running)
             self.source_choice.Enable(not running)
             self.device_choice.Enable(not running)
+            self.process_refresh_btn.Enable(not running)
+            self.process_browse_btn.Enable(not running)
             self.language_choice.Enable(not running)
             self.country_choice.Enable(not running)
             self.out_path.Enable(not running)
             self.browse_btn.Enable(not running)
             self.advanced_btn.Enable(not running)
+            self._radio.set_monitoring(running and self.source_choice.GetSelection() == 3)
 
         def _populate_devices(self) -> None:
+            is_process = self.source_choice.GetSelection() == 2
+            is_radio = self.source_choice.GetSelection() == 3
+            self._radio.panel.Show(is_radio)
+            self._device_label.Show(not is_radio)
+            self.device_choice.Show(not is_radio)
+            self._device_label.SetLabel("Program:" if is_process else t("label.device"))
+            self.device_choice.SetName("Program do nasłuchu" if is_process else t("name.device"))
+            self.process_refresh_btn.Show(is_process)
+            self.process_browse_btn.Show(is_process)
+            if is_radio:
+                self.Layout()
+                return
+            if is_process:
+                self._process_picker.refresh(force=True)
+                self.Layout()
+                return
             self.device_choice.Clear()
             self._devices.clear()
 
@@ -819,6 +901,7 @@ def _main() -> None:
                 self.device_choice.SetSelection(preferred_index)
             else:
                 wx.MessageBox(empty_message, _APP_NAME, wx.OK | wx.ICON_ERROR, self)
+            self.Layout()
 
         def _selected_device(self) -> _AudioDevice:
             idx = self.device_choice.GetSelection()
@@ -831,9 +914,16 @@ def _main() -> None:
             wx.MessageBox(t("info.restart_required"), _APP_NAME, wx.OK | wx.ICON_INFORMATION, self)
 
         def _on_source_changed(self, _event: wx.CommandEvent) -> None:
+            if self.source_choice.GetSelection() != 3:
+                self._radio.deactivate()
             self._populate_devices()
+            self._radio.panel.GetParent().GetSizer().SetSizeHints(self)
+            self._persist_config()
 
         def _on_device_changed(self, _event: wx.CommandEvent) -> None:
+            if self.source_choice.GetSelection() == 2:
+                self._process_picker.select_current()
+                return
             try:
                 device = self._selected_device()
             except Exception:
@@ -859,13 +949,14 @@ def _main() -> None:
             if country_idx != wx.NOT_FOUND and country_idx < len(self._country_codes):
                 endpoint_country = self._country_codes[country_idx]
 
-            source = "input" if self.source_choice.GetSelection() == 1 else "output"
+            source = ("output", "input", "process", "radio")[max(0, self.source_choice.GetSelection())]
             try:
-                device = self._selected_device()
-                if source == "input":
-                    self._device_id_input = device.id
-                else:
-                    self._device_id_output = device.id
+                if source in {"input", "output"}:
+                    device = self._selected_device()
+                    if source == "input":
+                        self._device_id_input = device.id
+                    else:
+                        self._device_id_output = device.id
             except Exception:
                 pass
 
@@ -874,6 +965,10 @@ def _main() -> None:
                 "ui_language": ui_language_value,
                 "output_path": self.out_path.GetValue(),
                 "source": source,
+                "radio": self._radio.config(),
+                "process_target": (
+                    self._process_picker.target.to_config() if self._process_picker.target else None
+                ),
                 "device_id_output": self._device_id_output,
                 "device_id_input": self._device_id_input,
                 "language": language,
@@ -884,6 +979,7 @@ def _main() -> None:
                     "max_windows_per_sample": self._advanced.max_windows_per_sample,
                     "window_step_seconds": self._advanced.window_step_seconds,
                     "silence_dbfs_threshold": self._advanced.silence_dbfs_threshold,
+                    "announce_recognitions": self._advanced.announce_recognitions,
                 },
             }
 
@@ -989,7 +1085,9 @@ def _main() -> None:
             sample.SetName(t("name.sample_seconds"))
 
             segment_label = wx.StaticText(panel, label=t("adv.segment_seconds"))
-            segment = wx.SpinCtrl(panel, min=5, max=60, initial=int(self._advanced.segment_seconds))
+            segment = wx.SpinCtrl(
+                panel, min=5, max=MAX_SIGNATURE_SECONDS, initial=int(self._advanced.segment_seconds)
+            )
             segment.SetName(t("name.segment_seconds"))
 
             windows_label = wx.StaticText(panel, label=t("adv.max_windows"))
@@ -1007,6 +1105,20 @@ def _main() -> None:
             silence = wx.TextCtrl(panel, value=str(self._advanced.silence_dbfs_threshold))
             silence.SetName(t("name.silence_dbfs"))
             silence.SetToolTip(t("tooltip.silence_dbfs"))
+
+            announce = wx.CheckBox(panel, label=t("adv.announce_recognitions"))
+            announce.SetName(t("adv.announce_recognitions"))
+            announce.SetToolTip(t("tooltip.announce_recognitions"))
+            announce.SetValue(self._advanced.announce_recognitions)
+            test_announcement = wx.Button(panel, label=t("button.test_announcement"))
+
+            def on_test_announcement(_evt: wx.CommandEvent) -> None:
+                if not self._announcer.speaker.speak(
+                    t("announcement.test"), int(self.log_list.GetHandle())
+                ):
+                    wx.MessageBox(t("announcement.failed"), _APP_NAME, wx.OK | wx.ICON_INFORMATION, dialog)
+
+            test_announcement.Bind(wx.EVT_BUTTON, on_test_announcement)
 
             grid = wx.FlexGridSizer(cols=2, vgap=8, hgap=8)
             grid.AddGrowableCol(1, 1)
@@ -1033,12 +1145,15 @@ def _main() -> None:
 
             root = wx.BoxSizer(wx.VERTICAL)
             root.Add(grid, 0, wx.ALL | wx.EXPAND, 12)
+            root.Add(announce, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+            root.Add(test_announcement, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
             root.Add(buttons, 0, wx.ALL | wx.EXPAND, 12)
             panel.SetSizer(root)
 
             dialog_sizer = wx.BoxSizer(wx.VERTICAL)
             dialog_sizer.Add(panel, 1, wx.EXPAND)
             dialog.SetSizer(dialog_sizer)
+            dialog_sizer.Fit(dialog)
             dialog.Layout()
             dialog.CentreOnParent()
 
@@ -1071,6 +1186,7 @@ def _main() -> None:
                     max_windows_per_sample=int(windows.GetValue()),
                     window_step_seconds=int(step.GetValue()),
                     silence_dbfs_threshold=silence_dbfs,
+                    announce_recognitions=bool(announce.GetValue()),
                 )
                 self._persist_config()
                 dialog.EndModal(wx.ID_OK)
@@ -1101,7 +1217,9 @@ def _main() -> None:
             if self._worker and self._worker.is_alive():
                 return
 
-            if not self._speakers:
+            is_process = self.source_choice.GetSelection() == 2
+            is_radio = self.source_choice.GetSelection() == 3
+            if not is_process and not is_radio and not self._speakers:
                 if not self._microphones:
                     wx.MessageBox(
                         t("error.no_audio_devices"),
@@ -1111,21 +1229,28 @@ def _main() -> None:
                     )
                     return
 
-            out_path = Path(self.out_path.GetValue()).expanduser()
-            if not str(out_path).strip():
+            raw_out_path = self.out_path.GetValue().strip()
+            if not raw_out_path:
                 wx.MessageBox(t("error.choose_output_file"), _APP_NAME, wx.OK | wx.ICON_ERROR, self)
                 return
+            out_path = Path(raw_out_path).expanduser()
 
             try:
-                device = self._selected_device()
+                if is_radio:
+                    device = self._radio.stream()
+                else:
+                    device = self._process_picker.selected() if is_process else self._selected_device()
             except Exception as exc:
+                if is_radio:
+                    self._announcer.speaker.speak(str(exc), int(self.GetHandle()))
                 wx.MessageBox(str(exc), _APP_NAME, wx.OK | wx.ICON_ERROR, self)
                 return
 
-            if self.source_choice.GetSelection() == 1:
-                self._device_id_input = device.id
-            else:
-                self._device_id_output = device.id
+            if isinstance(device, _AudioDevice):
+                if self.source_choice.GetSelection() == 1:
+                    self._device_id_input = device.id
+                else:
+                    self._device_id_output = device.id
 
             language = "en-US"
             lang_idx = self.language_choice.GetSelection()
@@ -1138,6 +1263,8 @@ def _main() -> None:
                 endpoint_country = self._country_codes[country_idx]
 
             self._stop_event.clear()
+            self._announcer.reset()
+            self.log_list.SetFocus()
             self._set_running(True)
             self.SetStatusText(t("status.starting"))
 
@@ -1152,46 +1279,63 @@ def _main() -> None:
 
         def _on_stop(self, _event: wx.CommandEvent) -> None:
             self._stop_event.set()
+            self._radio.request_monitor_stop()
             self.SetStatusText(t("status.stopping"))
 
         def _worker_main(
             self,
-            device: _AudioDevice,
+            device: _AudioDevice | ProcessTarget | RadioStream,
             out_path: Path,
             language: str,
             endpoint_country: str,
             advanced: _AdvancedSettings,
         ) -> None:
             writer = _HistoryWriter(out_path)
-            shazam = Shazam(
+            segment_seconds = signature_seconds(advanced.segment_seconds)
+            shazam = create_recognizer(
                 language=language,
                 endpoint_country=endpoint_country,
-                segment_duration_seconds=advanced.segment_seconds,
+                segment_duration_seconds=segment_seconds,
             )
 
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             consecutive_recognition_errors = 0
+            last_recognized = ""
 
             try:
                 while not self._stop_event.is_set():
-                    self._events.put(("status", t("status.listening")))
-                    audio = _record_wav(
-                        sc,
-                        device.id,
-                        include_loopback=(device.kind == "output"),
-                        duration_s=advanced.sample_seconds,
-                        sample_rate=16000,
-                        channels=1,
-                        chunk_size=1024,
-                        stop_event=self._stop_event,
-                    )
-                    if self._stop_event.is_set():
+                    listening = t("status.listening")
+                    if last_recognized:
+                        listening += f" Ostatnie rozpoznanie: {last_recognized}"
+                    self._events.put(("status", listening))
+                    if isinstance(device, RadioStream):
+                        audio = device.read_wav(
+                            duration_s=advanced.sample_seconds, stop_event=self._stop_event
+                        )
+                    elif isinstance(device, ProcessTarget):
+                        audio = record_process_wav(
+                            device, duration_s=advanced.sample_seconds,
+                            stop_event=self._stop_event,
+                            on_status=lambda message: self._events.put(("status", message)),
+                        )
+                    else:
+                        audio = _record_wav(
+                            sc,
+                            device.id,
+                            include_loopback=(device.kind == "output"),
+                            duration_s=advanced.sample_seconds,
+                            sample_rate=16000,
+                            channels=1,
+                            chunk_size=1024,
+                            stop_event=self._stop_event,
+                        )
+                    if audio is None or self._stop_event.is_set():
                         break
 
                     window_starts, best_dbfs = _rank_window_starts_by_rms(
                         audio,
-                        window_duration_s=advanced.segment_seconds,
+                        window_duration_s=segment_seconds,
                         window_step_s=advanced.window_step_seconds,
                         max_windows=advanced.max_windows_per_sample,
                     )
@@ -1207,7 +1351,7 @@ def _main() -> None:
                         window_audio = slice_wav_bytes(
                             audio,
                             start_s=int(rel_start_s),
-                            duration_s=advanced.segment_seconds,
+                            duration_s=segment_seconds,
                         )
                         if window_audio is None:
                             continue
@@ -1227,7 +1371,9 @@ def _main() -> None:
                             self._events.put(("status", t("status.recognizing")))
 
                         try:
-                            raw = loop.run_until_complete(shazam.recognize(window_audio))  # type: ignore[arg-type]
+                            raw = run_interruptible(
+                                loop, shazam.recognize(window_audio), stop_event=self._stop_event
+                            )
                         except Exception as exc:
                             recognition_exc = exc
                             raw = None
@@ -1239,6 +1385,8 @@ def _main() -> None:
                             break
                         raw = None
 
+                    if self._stop_event.is_set():
+                        break
                     if recognition_exc is not None:
                         consecutive_recognition_errors += 1
                         text = str(recognition_exc).strip()
@@ -1246,15 +1394,17 @@ def _main() -> None:
                         is_rate_limit = (
                             "429" in lowered
                             or "too many requests" in lowered
-                            or "failed to decode json" in lowered
                         )
 
                         backoff_s = min(
-                            300.0,
-                            5.0 * (2.0 ** max(0, consecutive_recognition_errors - 1)),
+                            30.0,
+                            5.0 * (2.0 ** min(4, max(0, consecutive_recognition_errors - 1))),
                         )
                         if is_rate_limit:
                             backoff_s = max(backoff_s, 30.0)
+                        retry_after = getattr(recognition_exc, "retry_after_s", None)
+                        if retry_after is not None:
+                            backoff_s = max(backoff_s, retry_after)
 
                         detail = f": {text}" if text else ""
                         self._events.put(
@@ -1271,6 +1421,8 @@ def _main() -> None:
                         continue
 
                     if raw is None:
+                        if isinstance(device, RadioStream):
+                            self._events.put(("radio_recognition_ok", ""))
                         consecutive_recognition_errors = 0
                         continue
 
@@ -1281,18 +1433,26 @@ def _main() -> None:
 
                     consecutive_recognition_errors = 0
                     line = f"{track.track.subtitle} - {track.track.title}"
+                    last_recognized = line
+                    self._events.put(("track", line))
+                    self._events.put(("status", f"Rozpoznano: {line}"))
                     try:
-                        if writer.append_unique(line):
-                            self._events.put(("track", line))
-                            self._events.put(("status", t("status.saved")))
+                        writer.append_unique(line)
                     except OSError as exc:
                         self._events.put(("error", t("error.write_file", error=str(exc))))
+                        break
             except Exception as exc:
                 self._events.put(("error", str(exc)))
             finally:
+                loop.close()
                 self._events.put(("stopped", t("status.stopped")))
 
         def _on_timer(self, _event: wx.TimerEvent) -> None:
+            self._radio.poll()
+            if self.source_choice.GetSelection() == 2 and not (
+                self._worker and self._worker.is_alive()
+            ):
+                self._process_picker.refresh()
             while True:
                 try:
                     kind, payload = self._events.get_nowait()
@@ -1301,10 +1461,27 @@ def _main() -> None:
 
                 if kind == "status":
                     self.SetStatusText(payload)
+                    if self.source_choice.GetSelection() == 3 and payload.startswith(
+                        ("Rozpoznawanie nieudane", "Recognition failed")
+                    ):
+                        self._radio.recognition_problem(payload)
+                elif kind == "radio_recognition_ok":
+                    self._radio.recognition_succeeded()
                 elif kind == "track":
-                    self.log_list.Append(payload)
+                    self._radio.recognition_succeeded()
+                    count = self.log_list.GetCount()
+                    if not count or self.log_list.GetString(count - 1) != payload:
+                        self.log_list.Append(payload)
+                    self._announcer.announce(
+                        payload,
+                        enabled=self._advanced.announce_recognitions,
+                        list_focused=self.IsActive() and wx.Window.FindFocus() == self.log_list,
+                        hwnd=int(self.log_list.GetHandle()),
+                    )
                 elif kind == "error":
                     self.SetStatusText(t("status.error"))
+                    if self.source_choice.GetSelection() == 3:
+                        self._announcer.speaker.speak(payload, int(self.GetHandle()))
                     wx.MessageBox(payload, _APP_NAME, wx.OK | wx.ICON_ERROR, self)
                     self._stop_event.set()
                 elif kind == "stopped":
@@ -1312,8 +1489,10 @@ def _main() -> None:
                     self._set_running(False)
 
         def _on_close(self, event: wx.CloseEvent) -> None:
+            self._persist_config()
             self._timer.Stop()
             self._stop_event.set()
+            self._radio.close()
             if self._worker and self._worker.is_alive():
                 self._worker.join(timeout=2.0)
             event.Skip()

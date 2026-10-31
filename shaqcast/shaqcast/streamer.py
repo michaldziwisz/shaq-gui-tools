@@ -13,9 +13,11 @@ from typing import Literal
 
 import numpy as np
 import soundcard as sc
-from shazamio import Serialize, Shazam
+from shazamio import Serialize
 
 from ._soundcard_compat import patch_soundcard_numpy_fromstring
+from ._process_audio import ProcessTarget, record_process_wav
+from ._recognition import create_recognizer, run_interruptible, signature_seconds
 from .icecast import update_now_playing as update_icecast_now_playing
 from .shoutcast import update_now_playing as update_shoutcast_now_playing
 
@@ -23,7 +25,7 @@ from .shoutcast import update_now_playing as update_shoutcast_now_playing
 LogFn = Callable[[str], None]
 
 _SHAZAM_SEGMENT_DURATION_S = int(os.environ.get("SHAQCAST_SHAZAM_SEGMENT_SECONDS", "12"))
-_SHAZAM_SEGMENT_DURATION_S = max(3, min(60, _SHAZAM_SEGMENT_DURATION_S))
+_SHAZAM_SEGMENT_DURATION_S = signature_seconds(max(3, _SHAZAM_SEGMENT_DURATION_S))
 
 _MAX_WINDOWS_PER_SAMPLE = max(
     1, min(6, int(os.environ.get("SHAQCAST_MAX_WINDOWS_PER_SAMPLE", "1")))
@@ -60,8 +62,9 @@ class StreamSettings:
     port: int
     password: str
     sids: list[int]
-    source: str  # "output" (loopback) or "input" (microphone)
+    source: str  # "output", "input" albo izolowany nasłuch "process"
     device_id: str
+    process_target: ProcessTarget | None = None
     server_type: StreamServerType = "shoutcast"
     icecast_user: str = "source"
     icecast_mounts: list[str] = field(default_factory=list)
@@ -87,7 +90,8 @@ def _capture_wav_bytes(
     sample_rate_hz: int,
     channels: int,
     chunk_frames: int,
-) -> bytearray:
+    stop_event: threading.Event | None = None,
+) -> bytearray | None:
     microphone = sc.get_microphone(device_id, include_loopback=include_loopback)
 
     total_frames = sample_rate_hz * duration_s
@@ -103,6 +107,8 @@ def _capture_wav_bytes(
         wav.setframerate(sample_rate_hz)
 
         while frames_recorded < total_frames:
+            if stop_event is not None and stop_event.is_set():
+                return None
             frames = min(chunk_frames, total_frames - frames_recorded)
             chunk = recorder.record(numframes=frames)
             pcm16 = (np.clip(chunk, -1.0, 1.0) * 32767).astype(np.int16)
@@ -240,13 +246,30 @@ class StreamingSession:
         self._thread.join(timeout=10.0)
 
     def _run(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            self._run_with_loop(loop)
+        except Exception as exc:
+            self._log(f"Zatrzymano nasłuch z powodu błędu: {exc}")
+        finally:
+            loop.close()
+
+    def _run_with_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         patch_soundcard_numpy_fromstring()
 
-        include_loopback = self._settings.source != "input"
+        is_process = self._settings.source == "process"
+        include_loopback = self._settings.source == "output"
         label = "loopback" if include_loopback else "microphone"
 
         try:
-            if include_loopback:
+            if is_process:
+                if self._settings.process_target is None:
+                    self._log("Nie wybrano programu do nasłuchu.")
+                    return
+                device_name = self._settings.process_target.name
+                label = "program"
+            elif include_loopback:
                 device_name = sc.get_speaker(self._settings.device_id).name
             else:
                 device_name = sc.get_microphone(self._settings.device_id).name
@@ -256,13 +279,12 @@ class StreamingSession:
 
         self._log(f"Listening ({label}): {device_name}")
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         segment_duration_s = min(
             max(3, int(self._settings.listen_seconds)),
             max(3, min(60, int(self._settings.shazam_segment_seconds))),
         )
-        shazam = Shazam(
+        segment_duration_s = signature_seconds(segment_duration_s)
+        shazam = create_recognizer(
             language=self._settings.language,
             endpoint_country=self._settings.endpoint_country,
             segment_duration_seconds=segment_duration_s,
@@ -273,14 +295,27 @@ class StreamingSession:
         while not self._stop_event.is_set():
             started = time.monotonic()
             try:
-                audio = _capture_wav_bytes(
-                    device_id=self._settings.device_id,
-                    include_loopback=include_loopback,
-                    duration_s=self._settings.listen_seconds,
-                    sample_rate_hz=self._settings.sample_rate_hz,
-                    channels=self._settings.channels,
-                    chunk_frames=self._settings.chunk_frames,
-                )
+                if is_process:
+                    audio = record_process_wav(
+                        self._settings.process_target,
+                        duration_s=self._settings.listen_seconds,
+                        sample_rate=self._settings.sample_rate_hz,
+                        channels=self._settings.channels,
+                        stop_event=self._stop_event,
+                        on_status=self._log,
+                    )
+                else:
+                    audio = _capture_wav_bytes(
+                        device_id=self._settings.device_id,
+                        include_loopback=include_loopback,
+                        duration_s=self._settings.listen_seconds,
+                        sample_rate_hz=self._settings.sample_rate_hz,
+                        channels=self._settings.channels,
+                        chunk_frames=self._settings.chunk_frames,
+                        stop_event=self._stop_event,
+                    )
+                if audio is None or self._stop_event.is_set():
+                    break
             except Exception as exc:
                 self._log(f"Audio capture failed: {exc}")
                 self._stop_event.wait(2.0)
@@ -312,34 +347,44 @@ class StreamingSession:
                             if since_last < min_interval_s:
                                 self._stop_event.wait(min_interval_s - since_last)
                             last_request_at = time.monotonic()
-                        raw = loop.run_until_complete(shazam.recognize(window_audio))
+                        if self._stop_event.is_set():
+                            break
+                        raw = run_interruptible(
+                            loop, shazam.recognize(window_audio), stop_event=self._stop_event
+                        )
                         track = Serialize.full_track(raw)
                         if track.matches:
                             break
                         raw = None
                         track = None
             except Exception as exc:
+                if self._stop_event.is_set():
+                    break
                 consecutive_recognition_errors += 1
                 text = str(exc).strip()
                 lowered = text.lower()
                 is_rate_limit = (
                     "429" in lowered
                     or "too many requests" in lowered
-                    or "failed to decode json" in lowered
                 )
 
                 backoff_s = min(
-                    300.0,
-                    5.0 * (2.0 ** max(0, consecutive_recognition_errors - 1)),
+                    30.0,
+                    5.0 * (2.0 ** min(4, max(0, consecutive_recognition_errors - 1))),
                 )
                 if is_rate_limit:
                     backoff_s = max(backoff_s, 30.0)
+                retry_after = getattr(exc, "retry_after_s", None)
+                if retry_after is not None:
+                    backoff_s = max(backoff_s, retry_after)
 
                 detail = f": {text}" if text else ""
                 self._log(f"Recognition failed, backing off {int(backoff_s)}s{detail}")
                 self._stop_event.wait(backoff_s)
                 continue
 
+            if self._stop_event.is_set():
+                break
             if track is None or not track.matches:
                 consecutive_recognition_errors = 0
                 elapsed = time.monotonic() - started

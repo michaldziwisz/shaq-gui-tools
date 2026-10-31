@@ -22,6 +22,13 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*audio
 import audioop
 
 from shaq._i18n import I18n, UI_LANGUAGE_CHOICES, ui_language_from_config
+from shaq._recognition import (
+    MAX_SIGNATURE_SECONDS,
+    RecognitionHTTPClient,
+    retry_after_seconds,
+    run_interruptible,
+    signature_seconds,
+)
 from shaq._file_scan import (
     FfmpegNotFoundError,
     extract_wav_segment,
@@ -49,14 +56,14 @@ except Exception as exc:  # pragma: no cover - optional at runtime (and for PyIn
 _APP_NAME = "shaqfilegui"
 _CONFIG_VERSION = 1
 _SHAZAM_SEGMENT_DURATION_S = int(os.environ.get("SHAQ_SHAZAM_SEGMENT_SECONDS", "12"))
-_SHAZAM_SEGMENT_DURATION_S = max(5, min(60, _SHAZAM_SEGMENT_DURATION_S))
+_SHAZAM_SEGMENT_DURATION_S = signature_seconds(max(5, _SHAZAM_SEGMENT_DURATION_S))
 
 _SAMPLE_DURATION_S = int(os.environ.get("SHAQ_SAMPLE_SECONDS", "15"))
 _SAMPLE_DURATION_S = max(_SHAZAM_SEGMENT_DURATION_S, min(60, _SAMPLE_DURATION_S))
 _BASE_MIN_REQUEST_INTERVAL_S = float(os.environ.get("SHAQ_MIN_REQUEST_INTERVAL_S", "10.0"))
 _BASE_MIN_REQUEST_INTERVAL_S = max(0.0, min(60.0, _BASE_MIN_REQUEST_INTERVAL_S))
 _DEFAULT_WORKERS = max(1, min(4, (os.cpu_count() or 4)))
-_RECOGNIZE_TIMEOUT_S = int(os.environ.get("SHAQ_RECOGNIZE_TIMEOUT_S", "60"))
+_RECOGNIZE_TIMEOUT_S = int(os.environ.get("SHAQ_RECOGNIZE_TIMEOUT_S", "20"))
 _RECOGNIZE_TIMEOUT_S = max(10, min(600, _RECOGNIZE_TIMEOUT_S))
 _MAX_WINDOWS_PER_SAMPLE = max(1, min(6, int(os.environ.get("SHAQ_MAX_WINDOWS_PER_SAMPLE", "3"))))
 _WINDOW_STEP_S = max(1, int(os.environ.get("SHAQ_WINDOW_STEP_S", "1")))
@@ -556,57 +563,8 @@ def _main() -> None:
     except Exception as exc:
         raise RuntimeError(f"Nie mogę załadować shazamio: {exc}") from exc
 
-    from aiohttp_retry import ExponentialRetry
-    from shazamio.client import HTTPClient
     from shazamio.converter import Converter
     from shazamio.misc import ShazamUrl
-
-    class _InstrumentedHTTPClient(HTTPClient):
-        def __init__(self) -> None:
-            super().__init__(
-                retry_options=ExponentialRetry(
-                    attempts=4,
-                    start_timeout=1.0,
-                    max_timeout=30.0,
-                    statuses={500, 502, 503, 504},
-                )
-            )
-            self.last_status: int | None = None
-            self.last_url: str | None = None
-            self.last_headers: dict[str, str] = {}
-            self.attempts: list[tuple[int, int]] = []
-
-            self.trace_config.on_request_end.append(self.on_request_end)
-            self.trace_config.on_request_exception.append(self.on_request_exception)
-
-        def reset(self) -> None:
-            self.last_status = None
-            self.last_url = None
-            self.last_headers = {}
-            self.attempts = []
-
-        async def request(self, method: str, url: str, *args: Any, **kwargs: Any) -> Any:
-            self.reset()
-            return await super().request(method, url, *args, **kwargs)
-
-        async def on_request_end(self, _session: Any, trace_config_ctx: Any, params: Any) -> None:
-            attempt = trace_config_ctx.trace_request_ctx.get("current_attempt", 0)
-            status = params.response.status
-
-            try:
-                attempt_n = int(attempt)
-            except Exception:
-                attempt_n = 0
-
-            self.attempts.append((attempt_n, int(status)))
-            self.last_status = int(status)
-            self.last_url = str(params.url)
-            self.last_headers = {k: v for k, v in params.response.headers.items()}
-
-        async def on_request_exception(
-            self, _session: Any, _trace_config_ctx: Any, _params: Any
-        ) -> None:
-            return
 
     class _PinnedShazam(Shazam):
         def __init__(
@@ -631,8 +589,8 @@ def _main() -> None:
             super().__init__(
                 language=language,
                 endpoint_country=endpoint_country,
-                http_client=_InstrumentedHTTPClient(),
-                segment_duration_seconds=segment_duration_seconds,
+                http_client=RecognitionHTTPClient(),
+                segment_duration_seconds=signature_seconds(segment_duration_seconds),
             )
 
         def headers(self) -> dict[str, str]:
@@ -714,7 +672,8 @@ def _main() -> None:
                 maximum=60,
             )
             sig_duration_s = _clamp_int(
-                adv_cfg.get("sig_duration_s", defaults.sig_duration_s), minimum=5, maximum=60
+                adv_cfg.get("sig_duration_s", defaults.sig_duration_s),
+                minimum=5, maximum=MAX_SIGNATURE_SECONDS
             )
             sample_duration_s = max(sample_duration_s, sig_duration_s)
             self._advanced = _AdvancedSettings(
@@ -1227,7 +1186,9 @@ def _main() -> None:
             sample.SetName(t("name.sample_seconds"))
 
             sig_label = wx.StaticText(panel, label=t("adv.signature_seconds"))
-            sig = wx.SpinCtrl(panel, min=5, max=60, initial=int(self._advanced.sig_duration_s))
+            sig = wx.SpinCtrl(
+                panel, min=5, max=MAX_SIGNATURE_SECONDS, initial=int(self._advanced.sig_duration_s)
+            )
             sig.SetName(t("name.signature_seconds"))
 
             workers_label = wx.StaticText(panel, label=t("adv.workers"))
@@ -1578,7 +1539,9 @@ def _main() -> None:
 
             workers = max(1, min(32, int(advanced.workers)))
             sample_duration_s = max(1, min(60, int(advanced.sample_duration_s)))
-            sig_duration_s = max(1, min(sample_duration_s, int(advanced.sig_duration_s)))
+            sig_duration_s = signature_seconds(
+                max(1, min(sample_duration_s, int(advanced.sig_duration_s)))
+            )
             min_api_interval_s = max(0, min(60, int(advanced.min_api_interval_s)))
             recognize_timeout_s = max(10, min(600, int(advanced.recognize_timeout_s)))
             max_windows_per_sample = max(1, min(6, int(advanced.max_windows_per_sample)))
@@ -1592,6 +1555,8 @@ def _main() -> None:
             shazam_user_agent = advanced.shazam_user_agent.strip() or _SHAZAM_USER_AGENT
             shazam_time_zone = advanced.shazam_time_zone.strip() or _SHAZAM_TIME_ZONE
 
+            runtime_loops: list[asyncio.AbstractEventLoop] = []
+            runtime_lock = threading.Lock()
             try:
                 duration_s = probe_duration_seconds(input_path)
                 total_samples = (
@@ -1636,7 +1601,8 @@ def _main() -> None:
                 rate_limit_count = 0
 
                 class _AdaptiveThrottle:
-                    def __init__(self, base_interval_s: float) -> None:
+                    def __init__(self, base_interval_s: float, stop_event: threading.Event) -> None:
+                        self._stop_event = stop_event
                         self._lock = threading.Lock()
                         self._next_allowed = 0.0
                         self._freeze_until = 0.0
@@ -1654,15 +1620,16 @@ def _main() -> None:
                             wait = self._compute_wait()
                         return int(math.ceil(wait)) if wait > 0 else 0
 
-                    def wait_for_slot(self) -> None:
-                        while True:
+                    def wait_for_slot(self) -> bool:
+                        while not self._stop_event.is_set():
                             with self._lock:
                                 wait = self._compute_wait()
                                 if wait <= 0:
                                     now = time.monotonic()
                                     self._next_allowed = now + self._min_interval_s
-                                    return
-                            time.sleep(min(wait, 1.0))
+                                    return True
+                            self._stop_event.wait(min(wait, 0.1))
+                        return False
 
                     def note_success(self) -> None:
                         with self._lock:
@@ -1704,7 +1671,7 @@ def _main() -> None:
                 segment_duration_s = max(1, min(sample_duration_s, int(sig_duration_s)))
 
                 base_interval_s = max(0.0, min(60.0, float(min_api_interval_s)))
-                throttle = _AdaptiveThrottle(base_interval_s)
+                throttle = _AdaptiveThrottle(base_interval_s, self._stop_event)
 
                 thread_state = threading.local()
 
@@ -1713,6 +1680,8 @@ def _main() -> None:
                     if loop is None or getattr(loop, "is_closed", lambda: False)():
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
+                        with runtime_lock:
+                            runtime_loops.append(loop)
                         thread_state.loop = loop
                         thread_state.shazam = None
                         thread_state.segment_duration_s = None
@@ -1765,15 +1734,8 @@ def _main() -> None:
                     return loop, shazam, getattr(shazam, "http_client", None)
 
                 def _parse_retry_after_seconds(value: str | None) -> int | None:
-                    if not value:
-                        return None
-                    try:
-                        seconds = int(value.strip())
-                    except ValueError:
-                        return None
-                    if seconds <= 0:
-                        return None
-                    return seconds
+                    seconds = retry_after_seconds(value)
+                    return math.ceil(seconds) if seconds is not None else None
 
                 def _recognize(
                     audio_bytes: bytes, *, label_offset_s: int
@@ -1807,10 +1769,13 @@ def _main() -> None:
                         async def _make_sig() -> Any:
                             return await shazam.core_recognizer.recognize_bytes(value=audio_bytes)
 
-                        sig = loop.run_until_complete(
-                            asyncio.wait_for(_make_sig(), timeout=recognize_timeout_s)
+                        sig = run_interruptible(
+                            loop, _make_sig(), stop_event=self._stop_event,
+                            timeout_s=recognize_timeout_s,
                         )
                     except Exception as exc:
+                        if self._stop_event.is_set():
+                            return None, "stopped"
                         message = str(exc).strip()
                         if message:
                             return None, f"{type(exc).__name__}: {message}"
@@ -1826,14 +1791,18 @@ def _main() -> None:
                             self._events.put(
                                 ("status", t("status.api_limit_pause", seconds=wait_s))
                             )
-                        throttle.wait_for_slot()
+                        if not throttle.wait_for_slot():
+                            return None, "stopped"
 
                         try:
                             coro = shazam.send_recognize_request_v2(sig=sig)
-                            raw = loop.run_until_complete(
-                                asyncio.wait_for(coro, timeout=recognize_timeout_s)
+                            raw = run_interruptible(
+                                loop, coro, stop_event=self._stop_event,
+                                timeout_s=recognize_timeout_s,
                             )
                         except Exception as exc:
+                            if self._stop_event.is_set():
+                                return None, "stopped"
                             attempts, status, retry_after, content_type = _http_snapshot()
                             chain = _attempt_chain(attempts)
 
@@ -1886,7 +1855,7 @@ def _main() -> None:
                                         ),
                                     )
                                 )
-                                continue
+                                return None, message
 
                             transient = (
                                 status is None
@@ -1896,11 +1865,11 @@ def _main() -> None:
                             non_rate_limit_attempts += 1
                             if (
                                 transient
-                                and non_rate_limit_attempts < 6
+                                and non_rate_limit_attempts < 2
                                 and not self._stop_event.is_set()
                             ):
                                 throttle.note_near_rate_limit()
-                                time.sleep(min(2.0**non_rate_limit_attempts, 60.0))
+                                self._stop_event.wait(min(2.0**non_rate_limit_attempts, 5.0))
                                 continue
 
                             return None, message
@@ -1939,7 +1908,7 @@ def _main() -> None:
                                     ),
                                 )
                             )
-                            continue
+                            return None, f"HTTP 429: limit zapytań, przerwa {wait_s} s."
 
                         if status is not None and status != 200:
                             detail = ""
@@ -1959,8 +1928,6 @@ def _main() -> None:
 
                         throttle.note_success()
                         return raw, None
-
-                    return None, t("error.recognize_failed")
 
                 audio_meta_lock = threading.Lock()
                 audio_meta_logged = False
@@ -2134,8 +2101,6 @@ def _main() -> None:
                             if error and error != "stopped":
                                 self._events.put(("warn", f"{format_hms(sample_offset)}\t{error}"))
                                 error_count += 1
-                                if "HTTP 429" in error:
-                                    rate_limit_count += 1
 
                             if line:
                                 matches_count += 1
@@ -2205,8 +2170,6 @@ def _main() -> None:
                                             ("warn", f"{format_hms(sample_offset)}\t{error}")
                                         )
                                         error_count += 1
-                                        if "HTTP 429" in error:
-                                            rate_limit_count += 1
 
                                     if line:
                                         matches_count += 1
@@ -2288,10 +2251,9 @@ def _main() -> None:
                             ),
                         )
                     )
-            except FfmpegNotFoundError:
-                raise
-            except Exception:
-                raise
+            finally:
+                for runtime_loop in runtime_loops:
+                    runtime_loop.close()
 
         def _on_timer(self, _event: wx.TimerEvent) -> None:
             while True:

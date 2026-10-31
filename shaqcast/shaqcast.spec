@@ -8,6 +8,10 @@ a = Analysis(
     datas=[],
     hiddenimports=[
         "shaqcast.sygnalista_gui",
+        "shaqcast._process_audio",
+        "shaqcast._process_picker",
+        "shaqcast._win_process_audio",
+        "shaqcast._recognition",
         "sygnalista_reporter",
     ],
     hookspath=[],

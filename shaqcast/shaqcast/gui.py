@@ -9,6 +9,8 @@ from typing import Any
 import wx
 
 from .audio import default_microphone_id, default_speaker_id, list_microphones, list_speakers
+from ._process_picker import ProcessPicker
+from ._recognition import MAX_SIGNATURE_SECONDS
 from .config_store import config_version, decrypt_secret, encrypt_secret, load_config, save_config
 from .icecast import parse_mounts
 from .i18n import I18n, UI_LANGUAGE_CHOICES, ui_language_from_config
@@ -351,7 +353,10 @@ class _AdvancedSettings:
 
 
 def _default_advanced() -> _AdvancedSettings:
-    seg = _clamp_int(os.environ.get("SHAQCAST_SHAZAM_SEGMENT_SECONDS", "12"), minimum=3, maximum=60)
+    seg = _clamp_int(
+        os.environ.get("SHAQCAST_SHAZAM_SEGMENT_SECONDS", "12"),
+        minimum=3, maximum=MAX_SIGNATURE_SECONDS
+    )
     max_windows = _clamp_int(
         os.environ.get("SHAQCAST_MAX_WINDOWS_PER_SAMPLE", "1"), minimum=1, maximum=6
     )
@@ -394,7 +399,7 @@ class MainFrame(wx.Frame):
             shazam_segment_seconds=_clamp_int(
                 adv_cfg.get("shazam_segment_seconds", defaults.shazam_segment_seconds),
                 minimum=3,
-                maximum=60,
+                maximum=MAX_SIGNATURE_SECONDS,
             ),
             max_windows_per_sample=_clamp_int(
                 adv_cfg.get("max_windows_per_sample", defaults.max_windows_per_sample),
@@ -554,18 +559,31 @@ class MainFrame(wx.Frame):
         source_label = wx.StaticText(panel, label=t("label.audio_source"))
         self._source = wx.Choice(
             panel,
-            choices=[t("choice.audio_source.output"), t("choice.audio_source.input")],
+            choices=[
+                t("choice.audio_source.output"), t("choice.audio_source.input"),
+                "Program (wybrany proces)",
+            ],
         )
         _a11y(self._source, t("label.audio_source").rstrip(":"))
         source_cfg = str(config.get("source") or "").strip().lower()
-        self._source.SetSelection(1 if source_cfg in {"input", "mic", "microphone"} else 0)
+        self._source.SetSelection(
+            2 if source_cfg == "process" else 1 if source_cfg in {"input", "mic", "microphone"} else 0
+        )
 
         device_label = wx.StaticText(panel, label=t("label.device"))
+        self._device_label = device_label
         self._device = wx.Choice(panel)
         _a11y(self._device, t("label.device").rstrip(":"))
         self._device.Bind(wx.EVT_CHOICE, self._on_device_changed)
         self._refresh = wx.Button(panel, label=t("button.refresh_devices"))
         _a11y(self._refresh, t("name.refresh_devices"))
+        self._process_browse = wx.Button(panel, label="Wskaż plik EXE…")
+        _a11y(self._process_browse, "Wskaż program do nasłuchu")
+        self._process_browse.Bind(wx.EVT_BUTTON, lambda _event: self._process_picker.browse())
+        self._process_picker = ProcessPicker(
+            self, self._device, config.get("process_target"),
+            changed=self._persist_config, status=self.log,
+        )
 
         self._advanced_btn = wx.Button(panel, label=t("button.advanced"))
         _a11y(self._advanced_btn, t("name.advanced"))
@@ -639,6 +657,7 @@ class MainFrame(wx.Frame):
         device_row = wx.BoxSizer(wx.HORIZONTAL)
         device_row.Add(self._device, 1, wx.EXPAND)
         device_row.Add(self._refresh, 0, wx.LEFT, 8)
+        device_row.Add(self._process_browse, 0, wx.LEFT, 8)
         grid.Add(device_row, 1, wx.EXPAND)
 
         buttons = wx.BoxSizer(wx.HORIZONTAL)
@@ -677,11 +696,26 @@ class MainFrame(wx.Frame):
         if self._selected_preset_name:
             self._apply_preset(self._selected_preset_name)
         self._apply_server_type_ui()
+        self._process_timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self._on_process_timer, self._process_timer)
+        self._process_timer.Start(2000)
+        if self._source.GetSelection() == 2:
+            wx.CallAfter(self._process_picker.startup_notice)
 
     def log(self, message: str) -> None:
         self._log.AppendText(message + "\n")
 
     def _populate_devices(self) -> None:
+        is_process = self._source.GetSelection() == 2
+        self._device_label.SetLabel("Program:" if is_process else self._t("label.device"))
+        _a11y(self._device, "Program do nasłuchu" if is_process else self._t("label.device").rstrip(":"))
+        self._process_browse.Show(is_process)
+        self._refresh.SetLabel("Odśwież programy" if is_process else self._t("button.refresh_devices"))
+        _a11y(self._refresh, "Odśwież programy" if is_process else self._t("name.refresh_devices"))
+        if is_process:
+            self._process_picker.refresh(force=True)
+            self.Layout()
+            return
         self._device.Clear()
         self._device_choices.clear()
 
@@ -710,6 +744,11 @@ class MainFrame(wx.Frame):
 
         if self._device_choices:
             self._device.SetSelection(default_index)
+        self.Layout()
+
+    def _on_process_timer(self, _event: wx.TimerEvent) -> None:
+        if self._source.GetSelection() == 2 and self._session is None:
+            self._process_picker.refresh()
 
     def _parse_sids(self) -> list[int]:
         raw = self._sids.GetValue().strip()
@@ -813,13 +852,14 @@ class MainFrame(wx.Frame):
         if country_idx != wx.NOT_FOUND and country_idx < len(self._country_codes):
             endpoint_country = self._country_codes[country_idx]
 
-        source = "input" if self._source.GetSelection() == 1 else "output"
+        source = ("output", "input", "process")[max(0, self._source.GetSelection())]
         try:
-            device_id = self._selected_device_id()
-            if source == "input":
-                self._device_id_input = device_id
-            else:
-                self._device_id_output = device_id
+            if source != "process":
+                device_id = self._selected_device_id()
+                if source == "input":
+                    self._device_id_input = device_id
+                else:
+                    self._device_id_output = device_id
         except Exception:
             pass
 
@@ -867,6 +907,9 @@ class MainFrame(wx.Frame):
             "language": language,
             "endpoint_country": endpoint_country,
             "source": source,
+            "process_target": (
+                self._process_picker.target.to_config() if self._process_picker.target else None
+            ),
             "device_id_output": self._device_id_output,
             "device_id_input": self._device_id_input,
             "selected_preset": self._selected_preset_name,
@@ -975,6 +1018,9 @@ class MainFrame(wx.Frame):
         )
 
     def _on_device_changed(self, _evt: wx.CommandEvent) -> None:
+        if self._source.GetSelection() == 2:
+            self._process_picker.select_current()
+            return
         source = "input" if self._source.GetSelection() == 1 else "output"
         try:
             device_id = self._selected_device_id()
@@ -1189,7 +1235,7 @@ class MainFrame(wx.Frame):
                 seg_s = parse_int(
                     seg.GetValue(),
                     minimum=3,
-                    maximum=60,
+                    maximum=MAX_SIGNATURE_SECONDS,
                     label=self._t("adv.segment_seconds_name"),
                 )
                 win_n = parse_int(
@@ -1270,7 +1316,8 @@ class MainFrame(wx.Frame):
 
     def _on_start(self, _evt: wx.CommandEvent) -> None:
         try:
-            source = "input" if self._source.GetSelection() == 1 else "output"
+            source = ("output", "input", "process")[max(0, self._source.GetSelection())]
+            process_target = self._process_picker.selected() if source == "process" else None
             port_raw = self._port.GetValue().strip()
             port = int(port_raw)
             if port < 1 or port > 65535:
@@ -1306,7 +1353,8 @@ class MainFrame(wx.Frame):
                 password=self._password.GetValue(),
                 sids=sids,
                 source=source,
-                device_id=self._selected_device_id(),
+                device_id="" if source == "process" else self._selected_device_id(),
+                process_target=process_target,
                 server_type=server_type,
                 icecast_user=icecast_user,
                 icecast_mounts=icecast_mounts,
@@ -1337,6 +1385,10 @@ class MainFrame(wx.Frame):
 
         self._start.Disable()
         self._stop.Enable()
+        self._source.Disable()
+        self._device.Disable()
+        self._refresh.Disable()
+        self._process_browse.Disable()
         self.log(self._t("log.listening_started"))
 
     def _on_stop(self, _evt: wx.CommandEvent) -> None:
@@ -1350,8 +1402,13 @@ class MainFrame(wx.Frame):
 
         self._stop.Disable()
         self._start.Enable()
+        self._source.Enable()
+        self._device.Enable()
+        self._refresh.Enable()
+        self._process_browse.Enable()
 
     def _on_close(self, evt: wx.CloseEvent) -> None:
+        self._process_timer.Stop()
         self._on_stop(wx.CommandEvent())
         self._persist_config()
         evt.Skip()

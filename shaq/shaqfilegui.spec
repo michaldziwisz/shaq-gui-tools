@@ -24,6 +24,7 @@ a = Analysis(
     datas=[],
     hiddenimports=[
         "shaq._sygnalista_gui",
+        "shaq._recognition",
         "sygnalista_reporter",
     ],
     hookspath=[],
