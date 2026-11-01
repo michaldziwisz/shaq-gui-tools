@@ -73,7 +73,7 @@ def test_live_gui_preserves_program_across_source_switches_and_restart(
 
     def inspect_frame() -> None:
         frame = next(window for window in wx.GetTopLevelWindows() if window.GetTitle() == "shaqgui")
-        assert frame.source_choice.GetCount() == 3
+        assert frame.source_choice.GetCount() == 4
         assert frame.source_choice.GetSelection() == 2
         assert (
             "nieuruchomiony" if language == "pl" else "not running"
