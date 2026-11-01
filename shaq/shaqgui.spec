@@ -7,6 +7,9 @@ a = Analysis(
     binaries=[],
     datas=[],
     hiddenimports=[
+        "shaq._process_audio",
+        "shaq._process_picker",
+        "shaq._win_process_audio",
         "shaq._sygnalista_gui",
         "sygnalista_reporter",
     ],

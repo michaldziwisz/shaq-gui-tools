@@ -16,6 +16,9 @@ import soundcard as sc
 from shazamio import Serialize, Shazam
 
 from ._soundcard_compat import patch_soundcard_numpy_fromstring
+from ._process_audio import ProcessTarget, record_process_wav
+from ._process_messages import _STRINGS as PROCESS_STRINGS
+from .i18n import I18n
 from .icecast import update_now_playing as update_icecast_now_playing
 from .shoutcast import update_now_playing as update_shoutcast_now_playing
 
@@ -60,8 +63,10 @@ class StreamSettings:
     port: int
     password: str
     sids: list[int]
-    source: str  # "output" (loopback) or "input" (microphone)
+    source: str  # "output", "input" albo izolowany nasłuch "process"
     device_id: str
+    process_target: ProcessTarget | None = None
+    ui_language: str = "pl"
     server_type: StreamServerType = "shoutcast"
     icecast_user: str = "source"
     icecast_mounts: list[str] = field(default_factory=list)
@@ -242,11 +247,19 @@ class StreamingSession:
     def _run(self) -> None:
         patch_soundcard_numpy_fromstring()
 
-        include_loopback = self._settings.source != "input"
+        t = I18n(self._settings.ui_language, PROCESS_STRINGS).t
+        is_process = self._settings.source == "process"
+        include_loopback = self._settings.source == "output"
         label = "loopback" if include_loopback else "microphone"
 
         try:
-            if include_loopback:
+            if is_process:
+                if self._settings.process_target is None:
+                    self._log(t("process.no_selection"))
+                    return
+                device_name = self._settings.process_target.name
+                label = "program"
+            elif include_loopback:
                 device_name = sc.get_speaker(self._settings.device_id).name
             else:
                 device_name = sc.get_microphone(self._settings.device_id).name
@@ -273,16 +286,28 @@ class StreamingSession:
         while not self._stop_event.is_set():
             started = time.monotonic()
             try:
-                audio = _capture_wav_bytes(
-                    device_id=self._settings.device_id,
-                    include_loopback=include_loopback,
-                    duration_s=self._settings.listen_seconds,
-                    sample_rate_hz=self._settings.sample_rate_hz,
-                    channels=self._settings.channels,
-                    chunk_frames=self._settings.chunk_frames,
-                )
+                if is_process:
+                    audio = record_process_wav(
+                        self._settings.process_target,
+                        duration_s=self._settings.listen_seconds,
+                        sample_rate=self._settings.sample_rate_hz,
+                        channels=self._settings.channels,
+                        stop_event=self._stop_event,
+                        on_status=self._log, translate=t,
+                    )
+                else:
+                    audio = _capture_wav_bytes(
+                        device_id=self._settings.device_id,
+                        include_loopback=include_loopback,
+                        duration_s=self._settings.listen_seconds,
+                        sample_rate_hz=self._settings.sample_rate_hz,
+                        channels=self._settings.channels,
+                        chunk_frames=self._settings.chunk_frames,
+                    )
+                if audio is None or self._stop_event.is_set():
+                    break
             except Exception as exc:
-                self._log(f"Audio capture failed: {exc}")
+                self._log(t("process.audio_error", error=str(exc)))
                 self._stop_event.wait(2.0)
                 continue
 
