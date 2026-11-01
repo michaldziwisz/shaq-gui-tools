@@ -11,6 +11,7 @@ import wx
 from .audio import default_microphone_id, default_speaker_id, list_microphones, list_speakers
 from ._process_picker import ProcessPicker
 from ._process_messages import _STRINGS as PROCESS_STRINGS
+from ._recognition import MAX_SIGNATURE_SECONDS
 from .config_store import config_version, decrypt_secret, encrypt_secret, load_config, save_config
 from .icecast import parse_mounts
 from .i18n import I18n, UI_LANGUAGE_CHOICES, ui_language_from_config
@@ -354,7 +355,10 @@ class _AdvancedSettings:
 
 
 def _default_advanced() -> _AdvancedSettings:
-    seg = _clamp_int(os.environ.get("SHAQCAST_SHAZAM_SEGMENT_SECONDS", "12"), minimum=3, maximum=60)
+    seg = _clamp_int(
+        os.environ.get("SHAQCAST_SHAZAM_SEGMENT_SECONDS", "12"),
+        minimum=3, maximum=MAX_SIGNATURE_SECONDS
+    )
     max_windows = _clamp_int(
         os.environ.get("SHAQCAST_MAX_WINDOWS_PER_SAMPLE", "1"), minimum=1, maximum=6
     )
@@ -397,7 +401,7 @@ class MainFrame(wx.Frame):
             shazam_segment_seconds=_clamp_int(
                 adv_cfg.get("shazam_segment_seconds", defaults.shazam_segment_seconds),
                 minimum=3,
-                maximum=60,
+                maximum=MAX_SIGNATURE_SECONDS,
             ),
             max_windows_per_sample=_clamp_int(
                 adv_cfg.get("max_windows_per_sample", defaults.max_windows_per_sample),
@@ -1233,7 +1237,7 @@ class MainFrame(wx.Frame):
                 seg_s = parse_int(
                     seg.GetValue(),
                     minimum=3,
-                    maximum=60,
+                    maximum=MAX_SIGNATURE_SECONDS,
                     label=self._t("adv.segment_seconds_name"),
                 )
                 win_n = parse_int(

@@ -21,7 +21,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller wxPython numpy soundcard shazamio aiohttp_retry
+          python -m pip install pyinstaller wxPython numpy soundcard "shazamio>=0.6,<0.9" aiohttp_retry
           python -m pip install "accessible-output2==0.17"
           python -m pip install "sygnalista-reporter @ git+https://github.com/michaldziwisz/sygnalista.git#subdirectory=python"
 

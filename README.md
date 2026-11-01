@@ -22,6 +22,7 @@
 
 - `SPECYFIKACJA_SHAQGUI_SHAQCAST.md`
 - [Radio, odsłuch i czytniki ekranu](ZMIANY_RADIO_CZYTNIKI.md)
+- [Klient HTTP, limity i ponowienia rozpoznawania](ZMIANY_ROZPOZNAWANIE.md)
 
 **Budowanie `.exe` (Windows):**
 

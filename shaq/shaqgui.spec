@@ -18,6 +18,7 @@ a = Analysis(
         "shaq._process_audio",
         "shaq._process_picker",
         "shaq._win_process_audio",
+        "shaq._recognition",
         "shaq._sygnalista_gui",
         "shaq._announcements",
         "shaq._uia_notifications",

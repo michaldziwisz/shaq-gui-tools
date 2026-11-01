@@ -23,6 +23,14 @@ from shaq._process_messages import _STRINGS as PROCESS_STRINGS
 from shaq._radio_messages import _STRINGS as RADIO_STRINGS
 from shaq._radio_panel import RadioPanel
 from shaq._radio_stream import RadioStream
+from shaq._recognition import _STRINGS as RECOGNITION_STRINGS
+from shaq._recognition import (
+    MAX_SIGNATURE_SECONDS,
+    create_recognizer,
+    recognition_backoff_seconds,
+    run_interruptible,
+    signature_seconds,
+)
 
 _SYGNALISTA_GUI_IMPORT_ERROR: str | None = None
 try:
@@ -44,7 +52,7 @@ from shaq._shazam_regions import (
 _APP_NAME = "shaqgui"
 
 _SHAZAM_SEGMENT_DURATION_S = int(os.environ.get("SHAQGUI_SHAZAM_SEGMENT_SECONDS", "12"))
-_SHAZAM_SEGMENT_DURATION_S = max(5, min(60, _SHAZAM_SEGMENT_DURATION_S))
+_SHAZAM_SEGMENT_DURATION_S = signature_seconds(max(5, _SHAZAM_SEGMENT_DURATION_S))
 
 _SAMPLE_DURATION_S = int(os.environ.get("SHAQGUI_SAMPLE_SECONDS", "15"))
 _SAMPLE_DURATION_S = max(_SHAZAM_SEGMENT_DURATION_S, min(60, _SAMPLE_DURATION_S))
@@ -77,6 +85,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "History saving is working again. A new result has been saved.",
     },
     **RADIO_STRINGS,
+    **RECOGNITION_STRINGS,
+    "status.recognized": {"pl": "Rozpoznano: {track}", "en": "Recognized: {track}"},
+    "status.last_recognized": {
+        "pl": "Ostatnie rozpoznanie: {track}", "en": "Last recognition: {track}"
+    },
     "crash.unable_start": {
         "pl": "Nie mogę uruchomić aplikacji.",
         "en": "Unable to start the app.",
@@ -610,7 +623,7 @@ def _main() -> None:
     patch_soundcard_numpy_fromstring()
 
     try:
-        from shazamio import Serialize, Shazam  # type: ignore
+        from shazamio import Serialize  # type: ignore
     except Exception as exc:
         raise RuntimeError(f"Nie mogę załadować shazamio: {exc}") from exc
 
@@ -655,7 +668,8 @@ def _main() -> None:
             adv_cfg = config.get("advanced") if isinstance(config.get("advanced"), dict) else {}
             defaults = _default_advanced_settings()
             segment_seconds = _clamp_int(
-                adv_cfg.get("segment_seconds", defaults.segment_seconds), minimum=5, maximum=60
+                adv_cfg.get("segment_seconds", defaults.segment_seconds),
+                minimum=5, maximum=MAX_SIGNATURE_SECONDS
             )
             sample_seconds = _clamp_int(
                 adv_cfg.get("sample_seconds", defaults.sample_seconds), minimum=5, maximum=60
@@ -1102,7 +1116,9 @@ def _main() -> None:
             sample.SetName(t("name.sample_seconds"))
 
             segment_label = wx.StaticText(panel, label=t("adv.segment_seconds"))
-            segment = wx.SpinCtrl(panel, min=5, max=60, initial=int(self._advanced.segment_seconds))
+            segment = wx.SpinCtrl(
+                panel, min=5, max=MAX_SIGNATURE_SECONDS, initial=int(self._advanced.segment_seconds)
+            )
             segment.SetName(t("name.segment_seconds"))
 
             windows_label = wx.StaticText(panel, label=t("adv.max_windows"))
@@ -1308,19 +1324,24 @@ def _main() -> None:
             advanced: _AdvancedSettings,
         ) -> None:
             writer = _HistoryWriter(out_path)
-            shazam = Shazam(
+            segment_seconds = signature_seconds(advanced.segment_seconds)
+            shazam = create_recognizer(
                 language=language,
                 endpoint_country=endpoint_country,
-                segment_duration_seconds=advanced.segment_seconds,
+                segment_duration_seconds=segment_seconds, translate=t,
             )
 
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             consecutive_recognition_errors = 0
+            last_recognized = ""
 
             try:
                 while not self._stop_event.is_set():
-                    self._events.put(("status", t("status.listening")))
+                    listening = t("status.listening")
+                    if last_recognized:
+                        listening += " " + t("status.last_recognized", track=last_recognized)
+                    self._events.put(("status", listening))
                     if isinstance(device, ProcessTarget):
                         audio = record_process_wav(
                             device, duration_s=advanced.sample_seconds,
@@ -1347,7 +1368,7 @@ def _main() -> None:
 
                     window_starts, best_dbfs = _rank_window_starts_by_rms(
                         audio,
-                        window_duration_s=advanced.segment_seconds,
+                        window_duration_s=segment_seconds,
                         window_step_s=advanced.window_step_seconds,
                         max_windows=advanced.max_windows_per_sample,
                     )
@@ -1363,7 +1384,7 @@ def _main() -> None:
                         window_audio = slice_wav_bytes(
                             audio,
                             start_s=int(rel_start_s),
-                            duration_s=advanced.segment_seconds,
+                            duration_s=segment_seconds,
                         )
                         if window_audio is None:
                             continue
@@ -1383,7 +1404,9 @@ def _main() -> None:
                             self._events.put(("status", t("status.recognizing")))
 
                         try:
-                            raw = loop.run_until_complete(shazam.recognize(window_audio))  # type: ignore[arg-type]
+                            raw = run_interruptible(
+                                loop, shazam.recognize(window_audio), stop_event=self._stop_event, translate=t
+                            )
                         except Exception as exc:
                             recognition_exc = exc
                             raw = None
@@ -1395,22 +1418,14 @@ def _main() -> None:
                             break
                         raw = None
 
+                    if self._stop_event.is_set():
+                        break
                     if recognition_exc is not None:
                         consecutive_recognition_errors += 1
                         text = str(recognition_exc).strip()
-                        lowered = text.lower()
-                        is_rate_limit = (
-                            "429" in lowered
-                            or "too many requests" in lowered
-                            or "failed to decode json" in lowered
+                        backoff_s = recognition_backoff_seconds(
+                            recognition_exc, consecutive_recognition_errors
                         )
-
-                        backoff_s = min(
-                            300.0,
-                            5.0 * (2.0 ** max(0, consecutive_recognition_errors - 1)),
-                        )
-                        if is_rate_limit:
-                            backoff_s = max(backoff_s, 30.0)
 
                         detail = f": {text}" if text else ""
                         self._events.put(
@@ -1440,6 +1455,8 @@ def _main() -> None:
                     consecutive_recognition_errors = 0
                     line = f"{track.track.subtitle} - {track.track.title}"
                     self._events.put(("recognition", line))
+                    last_recognized = line
+                    self._events.put(("status", t("status.recognized", track=line)))
                     try:
                         if writer.append_unique(line):
                             self._events.put(("track", line))
