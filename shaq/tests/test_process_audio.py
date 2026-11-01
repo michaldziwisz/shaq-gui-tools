@@ -60,6 +60,46 @@ def test_children_use_one_root_and_multiple_roots_are_rejected() -> None:
         audio.resolve_process(target, [process(), process(11)])
 
 
+@pytest.mark.parametrize("depth", [1, 4, 1500])
+def test_process_tree_follows_all_helpers_without_recursion(depth: int) -> None:
+    """Odtwarzacz pod pomocnikami należy do tego samego drzewa, także w odwrotnej kolejności."""
+    root = process()
+    helpers = [
+        process(pid, path=r"C:\Programy\helper.exe", parent=pid - 1)
+        for pid in range(11, 11 + depth)
+    ]
+    child = process(11 + depth, parent=10 + depth)
+    assert audio.resolve_process(root.target, iter([child, *reversed(helpers), root])) == root
+
+
+def test_common_helper_does_not_merge_separate_player_instances() -> None:
+    helper = process(10, path=r"C:\Programy\helper.exe")
+    first, second = process(11, parent=10), process(12, parent=10)
+    with pytest.raises(audio.MultipleProcessesError):
+        audio.resolve_process(first.target, [helper, first, second])
+
+
+def test_missing_helper_does_not_guess_relationship() -> None:
+    with pytest.raises(audio.MultipleProcessesError):
+        audio.resolve_process(process().target, [process(), process(20, parent=15)])
+
+
+def test_reused_parent_pid_does_not_merge_unrelated_players() -> None:
+    first = process(10)
+    helper = audio.ProcessInfo(20, 10, r"C:\Programy\helper.exe", 5000)
+    second = audio.ProcessInfo(30, 20, first.executable, 4000)
+    with pytest.raises(audio.MultipleProcessesError):
+        audio.resolve_process(first.target, [first, helper, second])
+
+
+@pytest.mark.parametrize("parent", [10, 20])
+def test_invalid_ancestor_cycle_is_rejected_without_hanging(parent: int) -> None:
+    root = audio.ProcessInfo(10, parent, process().executable, 100)
+    helper = audio.ProcessInfo(20, 10, r"C:\Programy\helper.exe", 100)
+    with pytest.raises(audio.MultipleProcessesError):
+        audio.resolve_process(root.target, [root, helper])
+
+
 def test_choices_keep_missing_saved_program_and_deduplicate() -> None:
     target = process().target
     assert audio.process_choices([], target) == [(target, False)]

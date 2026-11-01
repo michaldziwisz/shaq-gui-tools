@@ -10,6 +10,12 @@ WASAPI przechwytuje wskazany proces wraz z jego podprocesami, bez dźwięków
 niezależnych aplikacji, np. NVDA. Kilka niezależnych instancji tego samego EXE
 wymaga pozostawienia jednej. Przeniesiony EXE trzeba wskazać ponownie.
 
+Wybór sprawdza cały łańcuch przodków, także gdy pomiędzy dwoma procesami
+odtwarzacza znajduje się proces pomocniczy o innej nazwie. Taki łańcuch
+jest jednym drzewem; dwie niezależne instancje nadal wymagają wyboru jednej.
+Brak rodzica w odczytanej liście, ponowne użycie PID lub cykl nie powodują
+zgadywania pokrewieństwa ani zapętlenia. Analiza ma złożoność O(n).
+
 Wymagany jest Windows w kompilacji co najmniej 20348, np. Windows 11.
 Tryb nie instaluje sterowników i nie zastępuje niedostępnego procesu nasłuchem
 całego wyjścia. Całkowite wyciszenie odtwarzacza może usunąć jego sygnał przed
@@ -29,3 +35,5 @@ niejednoznaczny wybór, błędne dane, ochronę fokusu, tłumaczenia oraz kontro
 obu programów. `SHAQ_TEST_GUI=1` włącza testy wxPython, a
 `SHAQ_TEST_PROCESS_AUDIO=1` rzeczywisty test izolacji WASAPI z krótkimi tonami.
 Ustawienia użytkownika są zastępowane konfiguracją tymczasową podczas testów.
+Testy drzewa obejmują także 1500 procesów pomocniczych, odwróconą kolejność
+listy, brak przodka, ponowne użycie PID, cykl i niezależne procesy siostrzane.

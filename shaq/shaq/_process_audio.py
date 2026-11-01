@@ -137,15 +137,44 @@ def process_choices(
 
 
 def resolve_process(target: ProcessTarget, processes: Iterable[ProcessInfo]) -> ProcessInfo | None:
-    """Odnajduje główny proces programu; odrzuca wybór spośród kilku osobnych instancji."""
-    matches = [process for process in processes if _path_key(process.executable) == target.key]
+    """Sprawdza całe drzewo przodków w czasie O(n), także przez procesy pomocnicze."""
+    by_pid = {process.pid: process for process in processes}
+    matches = [
+        process for process in by_pid.values() if _path_key(process.executable) == target.key
+    ]
     if not matches:
         return None
     pids = {process.pid for process in matches}
-    roots = [process for process in matches if process.parent_pid not in pids]
-    if len(roots) != 1:
+    ancestors: dict[int, int | None] = {}
+    for process in matches:
+        trail: list[ProcessInfo] = []
+        visited: set[int] = set()
+        current = process
+        root_pid = None
+        while current.pid not in ancestors:
+            if current.pid in visited:
+                raise MultipleProcessesError("process.multiple", name=target.name)
+            visited.add(current.pid)
+            trail.append(current)
+            parent = by_pid.get(current.parent_pid)
+            if parent is None or (
+                current.creation_time > 0 and parent.creation_time > current.creation_time
+            ):
+                # Brak rodzica lub ponowne użycie jego PID nie dowodzi pokrewieństwa.
+                break
+            current = parent
+        else:
+            root_pid = ancestors[current.pid]
+        for ancestor in reversed(trail):
+            if root_pid is None and ancestor.pid in pids:
+                root_pid = ancestor.pid
+            ancestors[ancestor.pid] = root_pid
+    roots = {ancestors[process.pid] for process in matches}
+    if len(roots) != 1 or None in roots:
         raise MultipleProcessesError("process.multiple", name=target.name)
-    return roots[0]
+    root_pid = roots.pop()
+    assert root_pid is not None
+    return by_pid[root_pid]
 
 
 def process_unavailable_message(
