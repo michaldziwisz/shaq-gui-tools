@@ -6,7 +6,7 @@
 
 **Aplikacje (EXE):**
 
-- `shaqgui` — nasłuch z **Wyjścia (loopback)** albo **Wejścia (mikrofon)** → rozpoznanie → zapis historii do pliku.
+- `shaqgui` — nasłuch z **Wyjścia (loopback)**, **Wejścia (mikrofon)** albo **Strumienia radiowego** → rozpoznanie → zapis historii do pliku.
 - `shaqfilegui` — skanowanie **wielu plików** (albo całego folderu) przez próbkowanie co N sekund → zapis wyników do `.txt`.
 - `shaqcast` — nasłuch z wybranego urządzenia → rozpoznanie → aktualizacja “Now Playing” w Shoutcast (SIDy) lub Icecast (mounty).
 
@@ -19,13 +19,14 @@
 **Szczegóły techniczne i strojenie (dokładność/limity/backoff):**
 
 - `SPECYFIKACJA_SHAQGUI_SHAQCAST.md`
+- [Radio, odsłuch i czytniki ekranu](ZMIANY_RADIO_CZYTNIKI.md)
 
 **Budowanie `.exe` (Windows):**
 
 - `shaqgui` / `shaqfilegui`: `shaq/shaqgui.spec`, `shaq/shaqfilegui.spec`
 - `shaqcast`: `shaqcast/shaqcast.spec`
 
-Uwaga: do budowania `shaqfilegui.exe` potrzebne są `ffmpeg.exe`/`ffprobe.exe` w `shaq/vendor/ffmpeg` (można je pobrać skryptem `shaq/fetch_ffmpeg_windows.py`).
+Uwaga: do budowania `shaqgui.exe` potrzebny jest `ffmpeg.exe`, a do `shaqfilegui.exe` także `ffprobe.exe` w `shaq/vendor/ffmpeg` (można je pobrać skryptem `shaq/fetch_ffmpeg_windows.py`). Dekoder trafia do EXE, więc użytkownik nie musi instalować go w systemie.
 
 **Testy (pytest):**
 
