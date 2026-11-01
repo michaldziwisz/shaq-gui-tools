@@ -77,7 +77,7 @@ Ustawienia są czytane z ENV na starcie aplikacji:
   - Zakres: `<= 60`.
 - `SHAQGUI_SHAZAM_SEGMENT_SECONDS` (domyślnie `12`)
   - Ile sekund trafia do Shazama jako “podpis” (`segment_duration_seconds` w `Shazam(...)`).
-  - Zakres: `5..60`.
+  - Zakres: `5..12`; starsze wartości powyżej 12 s są ograniczane.
 - `SHAQGUI_MAX_WINDOWS_PER_SAMPLE` (domyślnie `2`)
   - Ile “najgłośniejszych” okien (RMS) w ramach jednej próbki zostanie spróbowanych.
   - Zakres: `1..6`.
@@ -93,6 +93,8 @@ Jeśli `recognize()` rzuca wyjątek, aplikacja robi pauzę i próbuje dalej:
 
 - Backoff: `5s, 10s, 20s, ...` (wykładniczo), max `300s`.
 - Jeśli błąd wygląda na limit (heurystyka po tekście: `429`, `too many requests`, `failed to decode json`) → minimalna pauza `30s`.
+- Status HTTP 429 jest dostępny również jako pole błędu. Nagłówek `Retry-After`
+  może wydłużyć pauzę ponad 300 s. Nie zmniejszamy zalecanej przez serwer przerwy.
 - Pauza jest realizowana przez `stop_event.wait(backoff)`, więc przycisk Stop przerywa czekanie.
 
 Uwaga: `shaqgui` nie ma ustawienia “min odstęp między requestami”; kontrola odbywa się przez backoff po błędach i przez ograniczenie liczby okien na próbkę.
@@ -129,7 +131,7 @@ Ustawiane w GUI:
 - `listen_seconds` (GUI + `StreamSettings.listen_seconds`)
   - Domyślnie `15`.
   - Zakres w GUI: `3..30`.
-- `SHAQCAST_SHAZAM_SEGMENT_SECONDS` (domyślnie `12`, zakres `3..60`)
+- `SHAQCAST_SHAZAM_SEGMENT_SECONDS` (domyślnie `12`, zakres `3..12`)
   - Maksymalna długość podpisu; realnie `min(listen_seconds, ...)`.
 - `SHAQCAST_MAX_WINDOWS_PER_SAMPLE` (domyślnie `1`, zakres `1..6`)
   - Ile okien RMS spróbować w ramach jednej próbki.
@@ -146,6 +148,7 @@ Analogicznie jak w `shaqgui`:
 
 - backoff wykładniczy `5s..300s`,
 - minimum `30s` jeśli wygląda na limit (heurystyka po treści błędu),
+- respektowanie dłuższego `Retry-After`,
 - dodatkowo stały limiter “min odstęp” (`SHAQCAST_MIN_REQUEST_INTERVAL_S`).
 
 ### Shazam (język/region)
@@ -166,7 +169,7 @@ Przykład (zwiększamy dokładność kosztem liczby requestów):
 
 ```powershell
 $env:SHAQGUI_SAMPLE_SECONDS="20"
-$env:SHAQGUI_SHAZAM_SEGMENT_SECONDS="15"
+$env:SHAQGUI_SHAZAM_SEGMENT_SECONDS="12"
 $env:SHAQGUI_MAX_WINDOWS_PER_SAMPLE="3"
 $env:SHAQGUI_WINDOW_STEP_S="1"
 .\shaqgui.exe
@@ -184,7 +187,7 @@ $env:SHAQCAST_MIN_REQUEST_INTERVAL_S="15"
 
 ```bat
 set SHAQGUI_SAMPLE_SECONDS=20
-set SHAQGUI_SHAZAM_SEGMENT_SECONDS=15
+set SHAQGUI_SHAZAM_SEGMENT_SECONDS=12
 set SHAQGUI_MAX_WINDOWS_PER_SAMPLE=3
 shaqgui.exe
 ```
@@ -192,16 +195,29 @@ shaqgui.exe
 ## Rekomendacje (dokładność vs limity)
 
 - Jeśli zależy Ci na **maksymalnej dokładności**:
-  - zwiększ `*_SHAZAM_SEGMENT_SECONDS` do 15–20,
-  - zwiększ `*_SAMPLE_SECONDS`/`listen_seconds` tak, aby był ≥ segment,
+  - pozostaw sygnaturę `*_SHAZAM_SEGMENT_SECONDS` nie dłuższą niż 12 s,
+  - wydłuż całą próbkę `*_SAMPLE_SECONDS`/`listen_seconds`, aby można było wybrać
+    najgłośniejsze okno; domyślna próbka ShaqGUI pozostaje 15-sekundowa,
   - zwiększ `*_MAX_WINDOWS_PER_SAMPLE` (np. 3–4) i zostaw `*_WINDOW_STEP_S=1`.
 - Jeśli zaczynają się limity API (429/HTML zamiast JSON):
   - dla `shaqcast` zwiększ `SHAQCAST_MIN_REQUEST_INTERVAL_S`,
   - dla obu aplikacji zmniejsz liczbę okien (`*_MAX_WINDOWS_PER_SAMPLE`) albo wydłuż próbkę (rzadsze requesty).
 
-## Notatka: ujednolicenie “PL” jak w `shaqfilegui`
+## Wspólny klient HTTP i kolejka ShaqFileGUI
 
-`shaqfilegui` używa customowego klienta HTTP i nagłówków, a `Accept-Language` jest ustawiane na wybrany w GUI `language`. `shaqgui` i `shaqcast` używają domyślnego klienta `shazamio`, ale również pozwalają wybrać `language`/`endpoint_country` w GUI. Jeśli chcesz, można przenieść ten sam “pinned HTTP client + nagłówki” także do `shaqgui`/`shaqcast`.
+Wszystkie trzy programy używają własnego klienta HTTP. `Accept-Language`
+odpowiada wybranemu językowi Shazama, niezależnie od języka interfejsu.
+Pojedyncze żądanie ma limit 15 s i nie wykonuje ukrytych ponowień biblioteki.
+Stop przerywa oczekiwanie na rozpoznanie.
+
+ShaqFileGUI odkłada okno po HTTP 429 i ponawia te same bajty po wspólnej pauzie.
+Nie zalicza odłożonej próbki jako ukończonej ani jako braku dopasowania.
+Nie gubi pozostałych okien próbki. Przy innych błędach przejściowych wykonuje
+maksymalnie 6 prób. Każde żądanie ma skończony czas; seria 429 może oczekiwać
+do ustąpienia ograniczenia, ale Stop przerywa również tę pauzę.
+
+Szczegóły decyzji o 15 s próbki, limicie sygnatury i zachowaniu przerwy 300 s
+opisuje [dokument zmian rozpoznawania](ZMIANY_ROZPOZNAWANIE.md).
 
 ## Dostępność (czytniki ekranu) — `shaqcast`
 
@@ -217,9 +233,14 @@ Naprawa:
 
 ## Testy jednostkowe (offline)
 
-W repo są tylko testy, które mają sens bez sieci i bez zależności GUI/audio:
+Podstawowe testy działają bez sieci i bez zależności GUI/audio:
 
 - `shaq/tests/*`: logika WAV (`slice_wav_bytes`), formatowanie czasu (`format_hms`), regiony/języki, zapis/odczyt configu, deduplikacja historii.
 - `shaqcast/tests/*`: zapis/odczyt configu, szyfrowanie/odszyfrowanie hasła presetów, heurystyka odpowiedzi Shoutcast/Icecast, regiony/języki.
 
 CI (GitHub Actions) uruchamia `pytest` na Linux (bez instalowania ciężkich zależności typu `wxPython`).
+
+Dodatkowe testy klienta HTTP wymagają `shazamio` i `aiohttp`. Testy prawdziwych
+kontrolek wxPython, kolejki HTTP 429 i zatrzymania rozpoznawania uruchamia się
+na Windows z `SHAQ_TEST_GUI=1`. Porównywane są też kopie `_recognition.py`
+w obu niezależnych pakietach.

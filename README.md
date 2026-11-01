@@ -19,6 +19,7 @@
 **Szczegóły techniczne i strojenie (dokładność/limity/backoff):**
 
 - `SPECYFIKACJA_SHAQGUI_SHAQCAST.md`
+- [Klient HTTP, limity i ponowienia rozpoznawania](ZMIANY_ROZPOZNAWANIE.md)
 
 **Budowanie `.exe` (Windows):**
 
