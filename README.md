@@ -2,6 +2,8 @@
 
 ## PL
 
+[Opis nasłuchu wybranego programu](ZMIANY_PROCES.md).
+
 `shaq-gui-tools` to zestaw dostępnych (czytniki ekranu) aplikacji GUI na Windows do rozpoznawania muzyki (Shazam) oraz pracy na plikach/strumieniu.
 
 **Aplikacje (EXE):**

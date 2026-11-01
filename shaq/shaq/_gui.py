@@ -16,6 +16,9 @@ from typing import Any
 
 from shaq._i18n import I18n, UI_LANGUAGE_CHOICES, ui_language_from_config
 from shaq._file_scan import slice_wav_bytes
+from shaq._process_audio import ProcessTarget, record_process_wav
+from shaq._process_picker import ProcessPicker
+from shaq._process_messages import _STRINGS as PROCESS_STRINGS
 
 _SYGNALISTA_GUI_IMPORT_ERROR: str | None = None
 try:
@@ -54,6 +57,7 @@ _DEFAULT_SHAZAM_COUNTRY = os.environ.get("SHAQGUI_SHAZAM_COUNTRY", "US").strip()
 _CONFIG_VERSION = 1
 
 _STRINGS: dict[str, dict[str, str]] = {
+    **PROCESS_STRINGS,
     "crash.unable_start": {
         "pl": "Nie mogę uruchomić aplikacji.",
         "en": "Unable to start the app.",
@@ -666,21 +670,37 @@ def _main() -> None:
                 choices=[
                     t("choice.audio_source.output"),
                     t("choice.audio_source.input"),
+                    t("process.choice"),
                 ],
             )
             self.source_choice.SetName(t("name.audio_source"))
             self.source_choice.Bind(wx.EVT_CHOICE, self._on_source_changed)
             source_cfg = str(config.get("source") or "").strip().lower()
-            if source_cfg in {"input", "mic", "microphone"}:
+            if source_cfg == "process":
+                self.source_choice.SetSelection(2)
+            elif source_cfg in {"input", "mic", "microphone"}:
                 self.source_choice.SetSelection(1)
             else:
                 self.source_choice.SetSelection(0)
 
             device_label = wx.StaticText(panel, label=t("label.device"))
+            self._device_label = device_label
             self.device_choice = wx.Choice(panel, choices=[])
             self.device_choice.SetName(t("name.device"))
             self.device_choice.Bind(wx.EVT_CHOICE, self._on_device_changed)
             self._devices: list[_AudioDevice] = []
+            self.process_refresh_btn = wx.Button(panel, label=t("process.refresh"))
+            self.process_refresh_btn.Bind(
+                wx.EVT_BUTTON, lambda _event: self._process_picker.refresh(force=True)
+            )
+            self.process_browse_btn = wx.Button(panel, label=t("process.browse"))
+            self.process_browse_btn.Bind(
+                wx.EVT_BUTTON, lambda _event: self._process_picker.browse()
+            )
+            self._process_picker = ProcessPicker(
+                self, self.device_choice, config.get("process_target"),
+                changed=self._persist_config, status=self.SetStatusText, translate=t,
+            )
             self._populate_devices()
 
             language_label = wx.StaticText(panel, label=t("label.shazam_language"))
@@ -739,7 +759,10 @@ def _main() -> None:
             grid.Add((1, 1))
             grid.Add(device_label, 0, wx.ALIGN_CENTER_VERTICAL)
             grid.Add(self.device_choice, 1, wx.EXPAND)
-            grid.Add((1, 1))
+            process_buttons = wx.BoxSizer(wx.HORIZONTAL)
+            process_buttons.Add(self.process_refresh_btn, 0, wx.RIGHT, 4)
+            process_buttons.Add(self.process_browse_btn, 0)
+            grid.Add(process_buttons, 0)
             grid.Add(language_label, 0, wx.ALIGN_CENTER_VERTICAL)
             grid.Add(self.language_choice, 1, wx.EXPAND)
             grid.Add((1, 1))
@@ -774,6 +797,8 @@ def _main() -> None:
             self._timer.Start(150)
 
             self.Bind(wx.EVT_CLOSE, self._on_close)
+            if self.source_choice.GetSelection() == 2:
+                wx.CallAfter(self._process_picker.startup_notice)
 
         def _set_running(self, running: bool) -> None:
             self.start_btn.Enable(not running)
@@ -781,6 +806,8 @@ def _main() -> None:
             self.ui_language_choice.Enable(not running)
             self.source_choice.Enable(not running)
             self.device_choice.Enable(not running)
+            self.process_refresh_btn.Enable(not running)
+            self.process_browse_btn.Enable(not running)
             self.language_choice.Enable(not running)
             self.country_choice.Enable(not running)
             self.out_path.Enable(not running)
@@ -788,6 +815,15 @@ def _main() -> None:
             self.advanced_btn.Enable(not running)
 
         def _populate_devices(self) -> None:
+            is_process = self.source_choice.GetSelection() == 2
+            self._device_label.SetLabel(t("process.label") if is_process else t("label.device"))
+            self.device_choice.SetName(t("process.name") if is_process else t("name.device"))
+            self.process_refresh_btn.Show(is_process)
+            self.process_browse_btn.Show(is_process)
+            if is_process:
+                self._process_picker.refresh(force=True)
+                self.Layout()
+                return
             self.device_choice.Clear()
             self._devices.clear()
 
@@ -819,6 +855,7 @@ def _main() -> None:
                 self.device_choice.SetSelection(preferred_index)
             else:
                 wx.MessageBox(empty_message, _APP_NAME, wx.OK | wx.ICON_ERROR, self)
+            self.Layout()
 
         def _selected_device(self) -> _AudioDevice:
             idx = self.device_choice.GetSelection()
@@ -832,8 +869,12 @@ def _main() -> None:
 
         def _on_source_changed(self, _event: wx.CommandEvent) -> None:
             self._populate_devices()
+            self._persist_config()
 
         def _on_device_changed(self, _event: wx.CommandEvent) -> None:
+            if self.source_choice.GetSelection() == 2:
+                self._process_picker.select_current()
+                return
             try:
                 device = self._selected_device()
             except Exception:
@@ -859,13 +900,14 @@ def _main() -> None:
             if country_idx != wx.NOT_FOUND and country_idx < len(self._country_codes):
                 endpoint_country = self._country_codes[country_idx]
 
-            source = "input" if self.source_choice.GetSelection() == 1 else "output"
+            source = ("output", "input", "process")[max(0, self.source_choice.GetSelection())]
             try:
-                device = self._selected_device()
-                if source == "input":
-                    self._device_id_input = device.id
-                else:
-                    self._device_id_output = device.id
+                if source in {"input", "output"}:
+                    device = self._selected_device()
+                    if source == "input":
+                        self._device_id_input = device.id
+                    else:
+                        self._device_id_output = device.id
             except Exception:
                 pass
 
@@ -874,6 +916,9 @@ def _main() -> None:
                 "ui_language": ui_language_value,
                 "output_path": self.out_path.GetValue(),
                 "source": source,
+                "process_target": (
+                    self._process_picker.target.to_config() if self._process_picker.target else None
+                ),
                 "device_id_output": self._device_id_output,
                 "device_id_input": self._device_id_input,
                 "language": language,
@@ -1101,7 +1146,8 @@ def _main() -> None:
             if self._worker and self._worker.is_alive():
                 return
 
-            if not self._speakers:
+            is_process = self.source_choice.GetSelection() == 2
+            if not is_process and not self._speakers:
                 if not self._microphones:
                     wx.MessageBox(
                         t("error.no_audio_devices"),
@@ -1111,21 +1157,23 @@ def _main() -> None:
                     )
                     return
 
-            out_path = Path(self.out_path.GetValue()).expanduser()
-            if not str(out_path).strip():
+            raw_out_path = self.out_path.GetValue().strip()
+            if not raw_out_path:
                 wx.MessageBox(t("error.choose_output_file"), _APP_NAME, wx.OK | wx.ICON_ERROR, self)
                 return
+            out_path = Path(raw_out_path).expanduser()
 
             try:
-                device = self._selected_device()
+                device = self._process_picker.selected() if is_process else self._selected_device()
             except Exception as exc:
                 wx.MessageBox(str(exc), _APP_NAME, wx.OK | wx.ICON_ERROR, self)
                 return
 
-            if self.source_choice.GetSelection() == 1:
-                self._device_id_input = device.id
-            else:
-                self._device_id_output = device.id
+            if isinstance(device, _AudioDevice):
+                if self.source_choice.GetSelection() == 1:
+                    self._device_id_input = device.id
+                else:
+                    self._device_id_output = device.id
 
             language = "en-US"
             lang_idx = self.language_choice.GetSelection()
@@ -1156,7 +1204,7 @@ def _main() -> None:
 
         def _worker_main(
             self,
-            device: _AudioDevice,
+            device: _AudioDevice | ProcessTarget,
             out_path: Path,
             language: str,
             endpoint_country: str,
@@ -1176,17 +1224,24 @@ def _main() -> None:
             try:
                 while not self._stop_event.is_set():
                     self._events.put(("status", t("status.listening")))
-                    audio = _record_wav(
-                        sc,
-                        device.id,
-                        include_loopback=(device.kind == "output"),
-                        duration_s=advanced.sample_seconds,
-                        sample_rate=16000,
-                        channels=1,
-                        chunk_size=1024,
-                        stop_event=self._stop_event,
-                    )
-                    if self._stop_event.is_set():
+                    if isinstance(device, ProcessTarget):
+                        audio = record_process_wav(
+                            device, duration_s=advanced.sample_seconds,
+                            stop_event=self._stop_event,
+                            on_status=lambda message: self._events.put(("status", message)), translate=t,
+                        )
+                    else:
+                        audio = _record_wav(
+                            sc,
+                            device.id,
+                            include_loopback=(device.kind == "output"),
+                            duration_s=advanced.sample_seconds,
+                            sample_rate=16000,
+                            channels=1,
+                            chunk_size=1024,
+                            stop_event=self._stop_event,
+                        )
+                    if audio is None or self._stop_event.is_set():
                         break
 
                     window_starts, best_dbfs = _rank_window_starts_by_rms(
@@ -1293,6 +1348,10 @@ def _main() -> None:
                 self._events.put(("stopped", t("status.stopped")))
 
         def _on_timer(self, _event: wx.TimerEvent) -> None:
+            if self.source_choice.GetSelection() == 2 and not (
+                self._worker and self._worker.is_alive()
+            ):
+                self._process_picker.refresh()
             while True:
                 try:
                     kind, payload = self._events.get_nowait()
@@ -1312,6 +1371,7 @@ def _main() -> None:
                     self._set_running(False)
 
         def _on_close(self, event: wx.CloseEvent) -> None:
+            self._persist_config()
             self._timer.Stop()
             self._stop_event.set()
             if self._worker and self._worker.is_alive():
