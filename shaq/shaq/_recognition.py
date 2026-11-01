@@ -58,15 +58,37 @@ class RecognitionError(RuntimeError):
     """Błąd usługi, którego nie należy traktować jako braku pasującego utworu."""
 
     def __init__(
-        self, message: str, *, status: int | None = None, retry_after_s: float | None = None
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        retry_after_s: float | None = None,
+        invalid_response: bool = False,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.retry_after_s = retry_after_s
+        self.invalid_response = invalid_response
 
 
 class RecognitionCancelled(RuntimeError):
     """Użytkownik zatrzymał rozpoznawanie."""
+
+
+def recognition_backoff_seconds(error: Exception, failures: int) -> float:
+    """Wyznacza pauzę z pól błędu, niezależnie od języka i treści komunikatu."""
+    if not isinstance(error, Exception) or type(failures) is not int:
+        raise TypeError("Wymagany jest wyjątek i całkowita liczba niepowodzeń.")
+    if failures < 1:
+        raise ValueError("Liczba niepowodzeń musi być dodatnia.")
+    delay = min(300.0, 5.0 * 2 ** min(6, failures - 1))
+    if isinstance(error, RecognitionError):
+        if error.status == 429 or error.invalid_response:
+            delay = max(delay, 30.0)
+        retry_after = error.retry_after_s
+        if isinstance(retry_after, (int, float)) and math.isfinite(retry_after):
+            delay = max(delay, retry_after)
+    return delay
 
 
 def signature_seconds(value: int) -> int:
@@ -104,6 +126,8 @@ class RecognitionHTTPClient:
         *,
         translate: Callable[..., str] = default_translate,
     ) -> None:
+        if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)):
+            raise TypeError("Limit czasu zapytania musi być liczbą.")
         if not math.isfinite(timeout_s) or timeout_s <= 0:
             raise ValueError("Limit czasu zapytania musi być dodatni i skończony.")
         self._t = translate
@@ -139,9 +163,19 @@ class RecognitionHTTPClient:
                     try:
                         result = await response.json(content_type=None)
                     except (ValueError, UnicodeError) as exc:
-                        raise RecognitionError(self._t("recognition.json")) from exc
+                        raise RecognitionError(
+                            self._t("recognition.json"),
+                            status=response.status,
+                            invalid_response=True,
+                            retry_after_s=retry_after_seconds(response.headers.get("Retry-After")),
+                        ) from exc
                     if not isinstance(result, dict) or not isinstance(result.get("matches"), list):
-                        raise RecognitionError(self._t("recognition.missing"))
+                        raise RecognitionError(
+                            self._t("recognition.missing"),
+                            status=response.status,
+                            invalid_response=True,
+                            retry_after_s=retry_after_seconds(response.headers.get("Retry-After")),
+                        )
                     return result
         except asyncio.TimeoutError as exc:
             raise RecognitionError(self._t("recognition.timeout", seconds=self.timeout_s)) from exc

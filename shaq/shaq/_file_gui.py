@@ -25,6 +25,7 @@ from shaq._i18n import I18n, UI_LANGUAGE_CHOICES, ui_language_from_config
 from shaq._recognition import _STRINGS as RECOGNITION_STRINGS
 from shaq._recognition import (
     MAX_SIGNATURE_SECONDS,
+    RecognitionError,
     RecognitionHTTPClient,
     retry_after_seconds,
     run_interruptible,
@@ -64,7 +65,7 @@ _SAMPLE_DURATION_S = max(_SHAZAM_SEGMENT_DURATION_S, min(60, _SAMPLE_DURATION_S)
 _BASE_MIN_REQUEST_INTERVAL_S = float(os.environ.get("SHAQ_MIN_REQUEST_INTERVAL_S", "10.0"))
 _BASE_MIN_REQUEST_INTERVAL_S = max(0.0, min(60.0, _BASE_MIN_REQUEST_INTERVAL_S))
 _DEFAULT_WORKERS = max(1, min(4, (os.cpu_count() or 4)))
-_RECOGNIZE_TIMEOUT_S = int(os.environ.get("SHAQ_RECOGNIZE_TIMEOUT_S", "20"))
+_RECOGNIZE_TIMEOUT_S = int(os.environ.get("SHAQ_RECOGNIZE_TIMEOUT_S", "60"))
 _RECOGNIZE_TIMEOUT_S = max(10, min(600, _RECOGNIZE_TIMEOUT_S))
 _MAX_WINDOWS_PER_SAMPLE = max(1, min(6, int(os.environ.get("SHAQ_MAX_WINDOWS_PER_SAMPLE", "3"))))
 _WINDOW_STEP_S = max(1, int(os.environ.get("SHAQ_WINDOW_STEP_S", "1")))
@@ -591,6 +592,7 @@ def _main() -> None:
             time_zone: str,
             accept_language: str,
             segment_duration_seconds: int,
+            request_timeout_s: float,
         ) -> None:
             self._device = device
             self._platform = platform
@@ -601,7 +603,7 @@ def _main() -> None:
             super().__init__(
                 language=language,
                 endpoint_country=endpoint_country,
-                http_client=RecognitionHTTPClient(translate=t),
+                http_client=RecognitionHTTPClient(timeout_s=request_timeout_s, translate=t),
                 segment_duration_seconds=signature_seconds(segment_duration_seconds),
             )
 
@@ -1731,6 +1733,7 @@ def _main() -> None:
                             time_zone=shazam_time_zone,
                             accept_language=accept_language,
                             segment_duration_seconds=segment_duration_s,
+                            request_timeout_s=recognize_timeout_s,
                         )
                         thread_state.shazam = shazam
                         thread_state.segment_duration_s = segment_duration_s
@@ -1807,6 +1810,7 @@ def _main() -> None:
                             return None, "stopped"
 
                         try:
+                            http_client.reset()
                             coro = shazam.send_recognize_request_v2(sig=sig)
                             raw = run_interruptible(
                                 loop, coro, stop_event=self._stop_event,
@@ -1816,6 +1820,8 @@ def _main() -> None:
                             if self._stop_event.is_set():
                                 return None, "stopped"
                             attempts, status, retry_after, content_type = _http_snapshot()
+                            if isinstance(exc, RecognitionError):
+                                status = exc.status
                             chain = _attempt_chain(attempts)
 
                             extra_bits: list[str] = []
@@ -1835,16 +1841,7 @@ def _main() -> None:
                             else:
                                 message = f"{type(exc).__name__}{extra}"
 
-                            is_rate_limited = status == 429 or (
-                                attempts and any(code == 429 for _attempt, code in attempts)
-                            )
-                            if not is_rate_limited and message:
-                                lowered = message.lower()
-                                is_rate_limited = (
-                                    "http 429" in lowered
-                                    or "429->" in lowered
-                                    or "too many requests" in lowered
-                                )
+                            is_rate_limited = status == 429
                             if is_rate_limited:
                                 with runtime_lock:
                                     rate_limit_count += 1
@@ -1873,7 +1870,7 @@ def _main() -> None:
                             transient = (
                                 status is None
                                 or (status >= 500 if status is not None else False)
-                                or "decode json" in message.lower()
+                                or (isinstance(exc, RecognitionError) and exc.invalid_response)
                             )
                             non_rate_limit_attempts += 1
                             if (
@@ -1882,7 +1879,7 @@ def _main() -> None:
                                 and not self._stop_event.is_set()
                             ):
                                 throttle.note_near_rate_limit()
-                                self._stop_event.wait(min(2.0**non_rate_limit_attempts, 5.0))
+                                self._stop_event.wait(min(2.0**non_rate_limit_attempts, 60.0))
                                 continue
 
                             return None, message

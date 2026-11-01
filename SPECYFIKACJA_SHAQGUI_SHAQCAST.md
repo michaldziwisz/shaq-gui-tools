@@ -92,8 +92,10 @@ Ustawienia są czytane z ENV na starcie aplikacji:
 Jeśli `recognize()` rzuca wyjątek, aplikacja robi pauzę i próbuje dalej:
 
 - Backoff: `5s, 10s, 20s, ...` (wykładniczo), max `300s`.
-- Jeśli błąd wygląda na limit (heurystyka po tekście: `429`, `too many requests`, `failed to decode json`) → minimalna pauza `30s`.
-- Status HTTP 429 jest dostępny również jako pole błędu. Nagłówek `Retry-After`
+- Pole `RecognitionError.status == 429` lub `invalid_response == True`
+  (niepoprawny JSON albo brak wymaganej listy wyników) oznacza minimum `30s`.
+  Treść i język komunikatu nie służą do klasyfikowania błędu.
+- Nagłówek `Retry-After`
   może wydłużyć pauzę ponad 300 s. Nie zmniejszamy zalecanej przez serwer przerwy.
 - Pauza jest realizowana przez `stop_event.wait(backoff)`, więc przycisk Stop przerywa czekanie.
 
@@ -207,13 +209,19 @@ shaqgui.exe
 
 Wszystkie trzy programy używają własnego klienta HTTP. `Accept-Language`
 odpowiada wybranemu językowi Shazama, niezależnie od języka interfejsu.
-Pojedyncze żądanie ma limit 15 s i nie wykonuje ukrytych ponowień biblioteki.
-Stop przerywa oczekiwanie na rozpoznanie.
+Klient nie wykonuje ukrytych ponowień biblioteki. W ShaqGUI i ShaqCast
+pojedyncze żądanie ma limit 15 s, a operacja rozpoznawania 20 s.
+W ShaqFileGUI ustawienie 10–600 s (domyślnie 60 s) obejmuje klienta HTTP
+oraz nadzór każdej operacji. Generowanie sygnatury i zapytanie mają osobne
+limity; limit nie jest wspólnym budżetem całej serii ponowień.
+Stop przerywa oczekiwanie na rozpoznanie także przy wybranym limicie 600 s.
 
 ShaqFileGUI odkłada okno po HTTP 429 i ponawia te same bajty po wspólnej pauzie.
 Nie zalicza odłożonej próbki jako ukończonej ani jako braku dopasowania.
 Nie gubi pozostałych okien próbki. Przy innych błędach przejściowych wykonuje
-maksymalnie 6 prób. Każde żądanie ma skończony czas; seria 429 może oczekiwać
+maksymalnie 6 prób. Pauza pomiędzy próbami rośnie wykładniczo z ograniczeniem
+60 s: dla sześciu prób są to 2, 4, 8, 16 i 32 s. Wspólne ograniczanie ruchu
+może ją wydłużyć. Każde żądanie ma skończony czas; seria 429 może oczekiwać
 do ustąpienia ograniczenia, ale Stop przerywa również tę pauzę.
 
 Szczegóły decyzji o 15 s próbki, limicie sygnatury i zachowaniu przerwy 300 s

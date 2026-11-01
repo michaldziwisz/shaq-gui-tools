@@ -15,9 +15,14 @@ import numpy as np
 import soundcard as sc
 from shazamio import Serialize
 
-from ._soundcard_compat import patch_soundcard_numpy_fromstring
-from ._recognition import create_recognizer, run_interruptible, signature_seconds
+from ._recognition import (
+    create_recognizer,
+    recognition_backoff_seconds,
+    run_interruptible,
+    signature_seconds,
+)
 from ._recognition import _STRINGS as RECOGNITION_STRINGS
+from ._soundcard_compat import patch_soundcard_numpy_fromstring
 from .i18n import I18n
 from .icecast import update_now_playing as update_icecast_now_playing
 from .shoutcast import update_now_playing as update_shoutcast_now_playing
@@ -347,21 +352,7 @@ class StreamingSession:
                     break
                 consecutive_recognition_errors += 1
                 text = str(exc).strip()
-                lowered = text.lower()
-                is_rate_limit = (
-                    "429" in lowered
-                    or "too many requests" in lowered
-                )
-
-                backoff_s = min(
-                    300.0,
-                    5.0 * (2.0 ** min(6, max(0, consecutive_recognition_errors - 1))),
-                )
-                if is_rate_limit:
-                    backoff_s = max(backoff_s, 30.0)
-                retry_after = getattr(exc, "retry_after_s", None)
-                if retry_after is not None:
-                    backoff_s = max(backoff_s, retry_after)
+                backoff_s = recognition_backoff_seconds(exc, consecutive_recognition_errors)
 
                 detail = f": {text}" if text else ""
                 self._log(f"Recognition failed, backing off {int(backoff_s)}s{detail}")

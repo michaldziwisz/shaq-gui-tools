@@ -13,6 +13,7 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -236,11 +237,13 @@ def test_write_failure_keeps_monitoring_and_list_contains_only_saved_unique_trac
     frame._on_timer(None)
     assert frame.log_list.GetStrings() == ["Wykonawca - Drugi", "Wykonawca - Pierwszy"]
     assert history.read_text(encoding="utf-8").splitlines() == frame.log_list.GetStrings()
-    assert not dialogs
+    assert len(dialogs) == 1
+    assert frame.history_status.GetValue() in _gui._STRINGS["history.restored"].values()
 
 
 @pytest.mark.parametrize("known_duration", [True, False])
 @pytest.mark.parametrize("first_window_misses", [False, True])
+@pytest.mark.parametrize("request_timeout", [10, 60, 600])
 @pytest.mark.parametrize(
     "statuses", [(429, 200), (429, 429, 200), (503, 503, 503, 503, 503, 200), (503,) * 6, (400,)]
 )
@@ -250,6 +253,7 @@ def test_file_scan_retries_exact_window_without_skipping_or_duplicate_progress(
     tmp_path: Path,
     known_duration: bool,
     first_window_misses: bool,
+    request_timeout: int,
     statuses: tuple[int, ...],
 ) -> None:
     """Wznawia te same bajty po limicie, także gdy długość pliku jest nieznana."""
@@ -265,7 +269,16 @@ def test_file_scan_retries_exact_window_without_skipping_or_duplicate_progress(
     decoded_offsets = []
     clock = [100.0]
     sliced_windows = []
+    operation_timeouts = []
     responses = (200, *statuses) if first_window_misses else statuses
+    run_interruptible = _file_gui.run_interruptible
+
+    def run_with_timeout(*args: Any, **kwargs: Any) -> Any:
+        operation_timeouts.append(kwargs["timeout_s"])
+        return run_interruptible(*args, **kwargs)
+
+    monkeypatch.setattr(_file_gui, "run_interruptible", run_with_timeout)
+    assert _file_gui._AdvancedSettings().recognize_timeout_s == 60
 
     class ControlledStop:
         """Przyspiesza wyłącznie pauzy skanera, bez zmiany zegara asyncio."""
@@ -299,13 +312,15 @@ def test_file_scan_retries_exact_window_without_skipping_or_duplicate_progress(
         self.core_recognizer = SimpleNamespace(recognize_bytes=signature)
 
     async def request(client: Any, *_args: Any, **kwargs: Any) -> dict[str, Any]:
+        assert client.timeout_s == request_timeout
         status = responses[len(requests)]
         requests.append((kwargs["json"], clock[0]))
         client.last_status = status
         client.last_headers = {"Retry-After": "12"} if status == 429 else {}
         client.attempts = [(1, status)]
         if status != 200:
-            raise RecognitionError(f"HTTP {status}", status=status)
+            message = "Limit usługi" if status == 429 else "Wcześniejszy błąd HTTP 429"
+            raise RecognitionError(message, status=status)
         return {"miss": first_window_misses and len(requests) == 1}
 
     def window(_audio: bytes, *, start_s: int, duration_s: int) -> bytes:
@@ -337,8 +352,10 @@ def test_file_scan_retries_exact_window_without_skipping_or_duplicate_progress(
             sig_duration_s=12,
             min_api_interval_s=0,
             max_windows_per_sample=2 if first_window_misses else 1,
+            recognize_timeout_s=request_timeout,
         ),
     )
+    assert operation_timeouts and set(operation_timeouts) == {request_timeout}
     assert len(requests) == len(responses)
     signatures = [payload["signature"] for payload, _timestamp in requests]
     if first_window_misses:
@@ -348,6 +365,9 @@ def test_file_scan_retries_exact_window_without_skipping_or_duplicate_progress(
     for index, status in enumerate(responses[:-1]):
         if status == 429:
             assert requests[index + 1][1] - requests[index][1] >= 12
+        elif status == 503:
+            attempt = index + 1 - int(first_window_misses)
+            assert requests[index + 1][1] - requests[index][1] >= min(2**attempt, 60)
     assert decoded_offsets.count(0) == 1
     progress = [
         payload for kind, payload in frame._events.queue if kind == "progress" and "done" in payload
@@ -423,3 +443,253 @@ def test_file_scan_stop_interrupts_rate_limit_without_counting_sample_done(
     finally:
         for timer in timers:
             timer.cancel()
+
+
+@pytest.mark.parametrize("language", ["pl", "en"])
+@pytest.mark.parametrize("speaker_available", [False, True])
+def test_history_warning_survives_status_updates_until_successful_save(
+    gui_environment: tuple[Any, Any, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    language: str,
+    speaker_available: bool,
+) -> None:
+    """Błąd jest dostępny mimo kolejnych statusów i ogłaszany raz na serię niepowodzeń."""
+    from shaq import _gui
+
+    wx, app, dialogs = gui_environment
+    _gui._save_config({"ui_language": language, "advanced": {"announce_recognitions": False}})
+    frame = _hidden_frame(_gui, wx, app, monkeypatch)
+    spoken = Mock(return_value=speaker_available)
+    has_speaker = hasattr(frame, "_announcer")
+    if has_speaker:
+        frame._announcer.speaker = SimpleNamespace(speak=spoken)
+    frame.log_list.Append("Starszy wynik")
+    frame.log_list.SetSelection(0)
+    frame.out_path.SetFocus()
+    initial_focus = wx.Window.FindFocus()
+    error = "Brak miejsca na dysku." if language == "pl" else "The disk is full."
+    for kind, payload in (
+        ("write_warning", error),
+        ("status", "Nasłuchuję"),
+        ("status", "Rozpoznaję"),
+        ("write_warning", error),
+    ):
+        frame._events.put((kind, payload))
+    frame._on_timer(None)
+    assert error in frame.history_status.GetValue()
+    assert frame.history_status.IsShown()
+    assert frame.history_status.GetName() == (
+        "Stan zapisu historii:" if language == "pl" else "History saving status:"
+    )
+    assert not frame.history_status.IsEditable()
+    assert ("Nasłuch trwa" if language == "pl" else "Monitoring continues") in (
+        frame.history_status.GetValue()
+    )
+    assert not frame._stop_event.is_set()
+    assert frame.log_list.GetSelection() == 0
+    assert wx.Window.FindFocus() == initial_focus
+    assert spoken.call_count == int(has_speaker)
+    assert len(dialogs) == int(not has_speaker or not speaker_available)
+    if has_speaker:
+        assert spoken.call_args.args[0] == frame.history_status.GetValue()
+
+    for _ in range(3):
+        frame._events.put(("status", "Zapisano rozpoznanie"))
+        frame._events.put(("write_warning", error))
+        frame._on_timer(None)
+    frame.SetStatusText("Dowolny status urządzenia lub radia")
+    assert error in frame.history_status.GetValue()
+    assert spoken.call_count == int(has_speaker)
+    assert len(dialogs) == int(not has_speaker or not speaker_available)
+
+    frame._events.put(("track", "Nowy zapisany utwór"))
+    frame._on_timer(None)
+    assert not frame._history_write_error
+    assert ("ponownie działa" if language == "pl" else "working again") in (
+        frame.history_status.GetValue()
+    )
+    frame._events.put(("write_warning", error))
+    frame._on_timer(None)
+    assert error in frame.history_status.GetValue()
+    assert spoken.call_count == 2 * int(has_speaker)
+    assert len(dialogs) == 2 * int(not has_speaker or not speaker_available)
+
+
+def test_history_warning_keeps_worker_running_and_duplicate_does_not_clear_it(
+    gui_environment: tuple[Any, Any, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Po błędzie zapisu znany utwór nie kasuje alarmu, a kolejny udany zapis go usuwa."""
+    import wave
+    from io import BytesIO
+
+    from shazamio import Serialize, Shazam
+
+    from shaq import _gui
+
+    wx, app, dialogs = gui_environment
+    frame = _hidden_frame(_gui, wx, app, monkeypatch)
+    spoken = Mock(return_value=True)
+    if hasattr(frame, "_announcer"):
+        frame._announcer.speaker = SimpleNamespace(speak=spoken)
+    history = tmp_path / "historia-test.txt"
+    history.write_text("Autor - Znany\n", encoding="utf-8")
+    titles = ["Nowy", "Znany", "Nowy"]
+    recognized: list[str] = []
+    saved_states: list[str] = []
+    with BytesIO() as buffer:
+        with wave.open(buffer, "wb") as output:
+            output.setnchannels(1)
+            output.setsampwidth(2)
+            output.setframerate(16000)
+            output.writeframes(b"\x00\x10" * 240000)
+        audio = buffer.getvalue()
+
+    def record(*_args: Any, **_kwargs: Any) -> bytes:
+        frame._on_timer(None)
+        saved_states.append(frame._history_write_error)
+        if len(recognized) == len(titles):
+            frame._stop_event.set()
+        return audio
+
+    async def recognize(_self: Any, _audio: bytes) -> dict[str, str]:
+        title = titles[len(recognized)]
+        recognized.append(title)
+        return {"title": title}
+
+    append = _gui._HistoryWriter.append_unique
+    attempts = []
+
+    def save(writer: Any, line: str) -> bool:
+        attempts.append(line)
+        if len(attempts) == 1:
+            raise OSError("Brak miejsca na dysku")
+        return append(writer, line)
+
+    monkeypatch.setattr(_gui, "_record_wav", record)
+    monkeypatch.setattr(_gui._HistoryWriter, "append_unique", save)
+    monkeypatch.setattr(Shazam, "__init__", lambda self, **kwargs: None)
+    monkeypatch.setattr(Shazam, "recognize", recognize)
+    monkeypatch.setattr(
+        Serialize,
+        "full_track",
+        lambda raw: SimpleNamespace(
+            matches=[True],
+            track=SimpleNamespace(subtitle="Autor", title=raw["title"]),
+        ),
+    )
+    frame._worker_main(
+        _gui._AudioDevice("Test", "test", "output"),
+        history,
+        "en-US",
+        "US",
+        _gui._default_advanced_settings(),
+    )
+    assert recognized == titles
+    assert saved_states[0] == saved_states[-1] == ""
+    assert saved_states[1] and saved_states[2] == saved_states[1]
+    assert frame.log_list.GetStrings() == ["Autor - Nowy"]
+    assert history.read_text(encoding="utf-8").splitlines() == ["Autor - Znany", "Autor - Nowy"]
+    assert len(dialogs) + spoken.call_count == 1
+
+
+@pytest.mark.parametrize("timeout", [10, 600])
+def test_file_stop_cancels_pending_http_with_configured_timeout(
+    gui_environment: tuple[Any, Any, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    timeout: int,
+) -> None:
+    """Stop anuluje trwające zapytanie, także przy maksymalnym limicie ustawień."""
+    from shazamio import Shazam
+
+    from shaq import _file_gui
+
+    wx, app, dialogs = gui_environment
+    frame = _hidden_frame(_file_gui, wx, app, monkeypatch)
+    released = threading.Event()
+    monkeypatch.setattr(_file_gui, "probe_duration_seconds", lambda _path: 1)
+    monkeypatch.setattr(_file_gui, "extract_wav_segment", lambda *_a, **_k: _test_wav())
+
+    async def signature(*, value: bytes) -> Any:
+        return SimpleNamespace(signature=SimpleNamespace(uri="test", samples=192000), timestamp=1)
+
+    def init_shazam(self: Any, **kwargs: Any) -> None:
+        self.language = kwargs["language"]
+        self.endpoint_country = kwargs["endpoint_country"]
+        self.http_client = kwargs["http_client"]
+        self.core_recognizer = SimpleNamespace(recognize_bytes=signature)
+
+    async def request(client: Any, *_args: Any, **_kwargs: Any) -> None:
+        assert client.timeout_s == timeout
+        try:
+            asyncio.get_running_loop().call_later(0.1, frame._stop_event.set)
+            await asyncio.sleep(600)
+        finally:
+            released.set()
+
+    monkeypatch.setattr(Shazam, "__init__", init_shazam)
+    monkeypatch.setattr(_file_gui.RecognitionHTTPClient, "request", request)
+    started = time.monotonic()
+    frame._scan_one_file(
+        input_path=tmp_path / "test.wav",
+        output_file=tmp_path / "wyniki.txt",
+        interval_s=30,
+        language="en-US",
+        endpoint_country="US",
+        file_index=1,
+        file_total=1,
+        advanced=_file_gui._AdvancedSettings(
+            workers=1, min_api_interval_s=0, recognize_timeout_s=timeout
+        ),
+    )
+    assert time.monotonic() - started < 2
+    assert released.is_set()
+    assert not dialogs
+
+
+@pytest.mark.parametrize(
+    "status,invalid_response,expected", [(429, False, 30), (200, True, 30), (503, False, 5)]
+)
+def test_live_worker_uses_error_fields_for_pause(
+    gui_environment: tuple[Any, Any, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    status: int,
+    invalid_response: bool,
+    expected: int,
+) -> None:
+    """Prawdziwa pętla nasłuchu wybiera pauzę z pól błędu, także przy mylącym tekście."""
+    from shaq import _gui
+    from shaq._recognition import RecognitionError
+
+    wx, app, _dialogs = gui_environment
+    frame = _hidden_frame(_gui, wx, app, monkeypatch)
+    pauses = []
+
+    def wait(seconds: float) -> bool:
+        pauses.append(seconds)
+        frame._stop_event.set()
+        return True
+
+    async def recognize(_audio: bytes) -> None:
+        raise RecognitionError(
+            "Poprzednio HTTP 429" if status == 503 else "Odpowiedź usługi",
+            status=status,
+            invalid_response=invalid_response,
+        )
+
+    monkeypatch.setattr(frame._stop_event, "wait", wait)
+    monkeypatch.setattr(_gui, "_record_wav", lambda *_a, **_k: _test_wav())
+    monkeypatch.setattr(
+        _gui, "create_recognizer", lambda **_k: SimpleNamespace(recognize=recognize)
+    )
+    frame._worker_main(
+        _gui._AudioDevice("Test", "test", "output"),
+        tmp_path / "history.txt",
+        "en-US",
+        "US",
+        _gui._default_advanced_settings(),
+    )
+    assert pauses == [expected]

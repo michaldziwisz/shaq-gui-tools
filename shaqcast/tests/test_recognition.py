@@ -19,6 +19,7 @@ from shaqcast._recognition import (
     RecognitionError,
     RecognitionHTTPClient,
     create_recognizer,
+    recognition_backoff_seconds,
     retry_after_seconds,
     run_interruptible,
     signature_seconds,
@@ -71,7 +72,11 @@ def fake_http(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[Any]]:
     aiohttp = pytest.importorskip("aiohttp")
 
     def configure(
-        *, status: int = 200, payload: Any = None, error: Exception | None = None
+        *,
+        status: int = 200,
+        payload: Any = None,
+        error: Exception | None = None,
+        timeout_s: float = 15,
     ) -> list[Any]:
         calls: list[Any] = []
 
@@ -82,7 +87,7 @@ def fake_http(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[Any]]:
             async def __aenter__(self) -> Response:
                 return self
 
-            async def __aexit__(self, *_args: Any) -> None:
+            async def __aexit__(self, *_args: object) -> None:
                 return None
 
             async def json(self, **_kwargs: Any) -> Any:
@@ -95,13 +100,13 @@ def fake_http(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[Any]]:
 
         class Session:
             def __init__(self, *, timeout: Any) -> None:
-                assert timeout.total == 15
-                assert timeout.connect == 5
+                assert timeout.total == timeout_s
+                assert timeout.connect == min(5, timeout_s)
 
             async def __aenter__(self) -> Session:
                 return self
 
-            async def __aexit__(self, *_args: Any) -> None:
+            async def __aexit__(self, *_args: object) -> None:
                 return None
 
             def request(self, method: str, url: str, **kwargs: Any) -> Response:
@@ -181,6 +186,68 @@ def test_connection_error_is_reported(fake_http: Callable[..., list[Any]]) -> No
 def test_invalid_http_timeout(timeout: float) -> None:
     with pytest.raises(ValueError):
         RecognitionHTTPClient(timeout)
+
+
+@pytest.mark.parametrize("timeout", [True, "60", None])
+def test_http_timeout_rejects_invalid_type(timeout: Any) -> None:
+    with pytest.raises(TypeError):
+        RecognitionHTTPClient(timeout)
+
+
+@pytest.mark.parametrize("timeout", [0.05, 10, 60, 600])
+def test_configured_http_timeout_reaches_session(
+    fake_http: Callable[..., list[Any]],
+    timeout: float,
+) -> None:
+    calls = fake_http(payload={"matches": []}, timeout_s=timeout)
+    result = asyncio.run(
+        RecognitionHTTPClient(timeout).request("POST", "https://example.invalid")
+    )
+    assert result == {"matches": []} and len(calls) == 1
+
+
+@pytest.mark.parametrize("error", [ValueError("JSON"), None])
+def test_invalid_response_preserves_status_and_marks_backoff(
+    fake_http: Callable[..., list[Any]],
+    error: Exception | None,
+) -> None:
+    fake_http(payload={}, error=error)
+    with pytest.raises(RecognitionError) as caught:
+        asyncio.run(RecognitionHTTPClient().request("POST", "https://example.invalid"))
+    assert caught.value.status == 200 and caught.value.invalid_response
+    assert recognition_backoff_seconds(caught.value, 1) == 45
+
+
+@pytest.mark.parametrize(
+    "error,failures,expected",
+    [
+        (RecognitionError("Dowolny tekst", status=429), 1, 30),
+        (RecognitionError("HTTP 429 w opisie", status=503), 1, 5),
+        (RuntimeError("HTTP 429 w opisie"), 1, 5),
+        (RecognitionError("Odpowiedź HTML", status=200, invalid_response=True), 1, 30),
+        (RecognitionError("Błąd", status=503), 2, 10),
+        (RecognitionError("Błąd", status=503), 10000, 300),
+        (RecognitionError("Limit", status=429, retry_after_s=500), 1, 500),
+        (RecognitionError("Limit", status=429, retry_after_s=1), 1, 30),
+        (RecognitionError("Błąd", retry_after_s=float("nan")), 1, 5),
+    ],
+)
+def test_backoff_uses_structured_error_and_honors_retry_after(
+    error: Exception,
+    failures: int,
+    expected: float,
+) -> None:
+    assert recognition_backoff_seconds(error, failures) == expected
+
+
+@pytest.mark.parametrize(
+    "failures,error", [(0, ValueError), (-1, ValueError), (True, TypeError)]
+)
+def test_backoff_rejects_invalid_failure_count(
+    failures: Any, error: type[Exception]
+) -> None:
+    with pytest.raises(error):
+        recognition_backoff_seconds(RuntimeError("Błąd"), failures)
 
 
 def test_factory_passes_bounded_client_and_repairs_old_duration(
