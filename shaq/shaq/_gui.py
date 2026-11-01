@@ -58,6 +58,20 @@ _DEFAULT_SHAZAM_COUNTRY = os.environ.get("SHAQGUI_SHAZAM_COUNTRY", "US").strip()
 _CONFIG_VERSION = 1
 
 _STRINGS: dict[str, dict[str, str]] = {
+    "history.label": {"pl": "Stan zapisu historii:", "en": "History saving status:"},
+    "history.no_error": {
+        "pl": "Brak zgłoszonych błędów zapisu.",
+        "en": "No saving errors have been reported.",
+    },
+    "history.warning_title": {"pl": "Błąd zapisu historii", "en": "History saving error"},
+    "history.warning": {
+        "pl": "{error} Nasłuch trwa. Ostrzeżenie pozostanie do udanego zapisu nowego wyniku.",
+        "en": "{error} Monitoring continues. This warning remains until a new result is saved.",
+    },
+    "history.restored": {
+        "pl": "Zapis historii ponownie działa. Nowy wynik został zapisany.",
+        "en": "History saving is working again. A new result has been saved.",
+    },
     **RADIO_STRINGS,
     "crash.unable_start": {
         "pl": "Nie mogę uruchomić aplikacji.",
@@ -744,6 +758,12 @@ def _main() -> None:
 
             self.log_list = wx.ListBox(panel)
             self.log_list.SetName(t("name.saved_recognitions"))
+            self._history_write_error = ""
+            history_label = wx.StaticText(panel, label=t("history.label"))
+            self.history_status = wx.TextCtrl(
+                panel, value=t("history.no_error"), style=wx.TE_READONLY | wx.TE_MULTILINE
+            )
+            self.history_status.SetName(t("history.label"))
             self.log_list.SetMinSize((-1, 180))
 
             self.advanced_btn = wx.Button(panel, label=t("button.advanced"))
@@ -801,6 +821,8 @@ def _main() -> None:
                 12,
             )
             layout.Add(self.log_list, 1, wx.EXPAND | wx.ALL, 12)
+            layout.Add(history_label, 0, wx.LEFT | wx.RIGHT, 12)
+            layout.Add(self.history_status, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
             layout.Add(buttons, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
             panel.SetSizer(layout)
             layout.SetSizeHints(self)
@@ -1379,6 +1401,25 @@ def _main() -> None:
                 loop.close()
                 self._events.put(("stopped", t("status.stopped")))
 
+        def _history_write_failed(self, error: str) -> None:
+            """Zachowuje dostępny komunikat i ogłasza pierwszy błąd danej serii."""
+            first_failure = not self._history_write_error
+            self._history_write_error = error
+            text = t("history.warning", error=error)
+            self.history_status.ChangeValue(text)
+            if not first_failure:
+                return
+            if not self._announcer.speaker.speak(text, int(self.history_status.GetHandle())):
+                wx.MessageBox(
+                    text, t("history.warning_title"), wx.OK | wx.ICON_WARNING, self
+                )
+
+        def _history_write_succeeded(self) -> None:
+            """Usuwa ostrzeżenie dopiero po rzeczywistym zapisie nowego wyniku."""
+            if self._history_write_error:
+                self._history_write_error = ""
+                self.history_status.ChangeValue(t("history.restored"))
+
         def _on_timer(self, _event: wx.TimerEvent) -> None:
             self._radio.poll()
             while True:
@@ -1387,8 +1428,10 @@ def _main() -> None:
                 except Empty:
                     break
 
-                if kind in {"status", "write_warning"}:
+                if kind == "status":
                     self.SetStatusText(payload)
+                elif kind == "write_warning":
+                    self._history_write_failed(payload)
                 elif kind == "recognition_failed":
                     self.SetStatusText(payload)
                     if self.source_choice.GetSelection() == 2:
@@ -1404,6 +1447,7 @@ def _main() -> None:
                         hwnd=int(self.log_list.GetHandle()),
                     )
                 elif kind == "track":
+                    self._history_write_succeeded()
                     self.log_list.Append(payload)
                 elif kind == "error":
                     self.SetStatusText(t("status.error"))

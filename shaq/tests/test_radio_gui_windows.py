@@ -529,3 +529,152 @@ def test_recognition_problem_uses_event_kind_instead_of_message_prefix(
     frame._events.put(("recognition_failed", "Dowolny komunikat C"))
     frame._on_timer(None)
     assert spoken == ["Dowolny komunikat A", "Dowolny komunikat C"]
+
+
+@pytest.mark.parametrize("language", ["pl", "en"])
+@pytest.mark.parametrize("speaker_available", [False, True])
+def test_history_warning_survives_status_updates_until_successful_save(
+    gui_environment: tuple[Any, Any, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    language: str,
+    speaker_available: bool,
+) -> None:
+    """Błąd jest dostępny mimo kolejnych statusów i ogłaszany raz na serię niepowodzeń."""
+    from shaq import _gui
+
+    wx, app, dialogs = gui_environment
+    _gui._save_config({"ui_language": language, "advanced": {"announce_recognitions": False}})
+    frame = _hidden_frame(_gui, wx, app, monkeypatch)
+    spoken = Mock(return_value=speaker_available)
+    has_speaker = hasattr(frame, "_announcer")
+    if has_speaker:
+        frame._announcer.speaker = SimpleNamespace(speak=spoken)
+    frame.log_list.Append("Starszy wynik")
+    frame.log_list.SetSelection(0)
+    frame.out_path.SetFocus()
+    initial_focus = wx.Window.FindFocus()
+    error = "Brak miejsca na dysku." if language == "pl" else "The disk is full."
+    for kind, payload in (
+        ("write_warning", error),
+        ("status", "Nasłuchuję"),
+        ("status", "Rozpoznaję"),
+        ("write_warning", error),
+    ):
+        frame._events.put((kind, payload))
+    frame._on_timer(None)
+    assert error in frame.history_status.GetValue()
+    assert frame.history_status.IsShown()
+    assert frame.history_status.GetName() == (
+        "Stan zapisu historii:" if language == "pl" else "History saving status:"
+    )
+    assert not frame.history_status.IsEditable()
+    assert ("Nasłuch trwa" if language == "pl" else "Monitoring continues") in (
+        frame.history_status.GetValue()
+    )
+    assert not frame._stop_event.is_set()
+    assert frame.log_list.GetSelection() == 0
+    assert wx.Window.FindFocus() == initial_focus
+    assert spoken.call_count == int(has_speaker)
+    assert len(dialogs) == int(not has_speaker or not speaker_available)
+    if has_speaker:
+        assert spoken.call_args.args[0] == frame.history_status.GetValue()
+
+    for _ in range(3):
+        frame._events.put(("status", "Zapisano rozpoznanie"))
+        frame._events.put(("write_warning", error))
+        frame._on_timer(None)
+    frame.SetStatusText("Dowolny status urządzenia lub radia")
+    assert error in frame.history_status.GetValue()
+    assert spoken.call_count == int(has_speaker)
+    assert len(dialogs) == int(not has_speaker or not speaker_available)
+
+    frame._events.put(("track", "Nowy zapisany utwór"))
+    frame._on_timer(None)
+    assert not frame._history_write_error
+    assert ("ponownie działa" if language == "pl" else "working again") in (
+        frame.history_status.GetValue()
+    )
+    frame._events.put(("write_warning", error))
+    frame._on_timer(None)
+    assert error in frame.history_status.GetValue()
+    assert spoken.call_count == 2 * int(has_speaker)
+    assert len(dialogs) == 2 * int(not has_speaker or not speaker_available)
+
+
+def test_history_warning_keeps_worker_running_and_duplicate_does_not_clear_it(
+    gui_environment: tuple[Any, Any, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Po błędzie zapisu znany utwór nie kasuje alarmu, a kolejny udany zapis go usuwa."""
+    import wave
+    from io import BytesIO
+
+    from shazamio import Serialize, Shazam
+
+    from shaq import _gui
+
+    wx, app, dialogs = gui_environment
+    frame = _hidden_frame(_gui, wx, app, monkeypatch)
+    spoken = Mock(return_value=True)
+    if hasattr(frame, "_announcer"):
+        frame._announcer.speaker = SimpleNamespace(speak=spoken)
+    history = tmp_path / "historia-test.txt"
+    history.write_text("Autor - Znany\n", encoding="utf-8")
+    titles = ["Nowy", "Znany", "Nowy"]
+    recognized: list[str] = []
+    saved_states: list[str] = []
+    with BytesIO() as buffer:
+        with wave.open(buffer, "wb") as output:
+            output.setnchannels(1)
+            output.setsampwidth(2)
+            output.setframerate(16000)
+            output.writeframes(b"\x00\x10" * 240000)
+        audio = buffer.getvalue()
+
+    def record(*_args: Any, **_kwargs: Any) -> bytes:
+        frame._on_timer(None)
+        saved_states.append(frame._history_write_error)
+        if len(recognized) == len(titles):
+            frame._stop_event.set()
+        return audio
+
+    async def recognize(_self: Any, _audio: bytes) -> dict[str, str]:
+        title = titles[len(recognized)]
+        recognized.append(title)
+        return {"title": title}
+
+    append = _gui._HistoryWriter.append_unique
+    attempts = []
+
+    def save(writer: Any, line: str) -> bool:
+        attempts.append(line)
+        if len(attempts) == 1:
+            raise OSError("Brak miejsca na dysku")
+        return append(writer, line)
+
+    monkeypatch.setattr(_gui, "_record_wav", record)
+    monkeypatch.setattr(_gui._HistoryWriter, "append_unique", save)
+    monkeypatch.setattr(Shazam, "__init__", lambda self, **kwargs: None)
+    monkeypatch.setattr(Shazam, "recognize", recognize)
+    monkeypatch.setattr(
+        Serialize,
+        "full_track",
+        lambda raw: SimpleNamespace(
+            matches=[True],
+            track=SimpleNamespace(subtitle="Autor", title=raw["title"]),
+        ),
+    )
+    frame._worker_main(
+        _gui._AudioDevice("Test", "test", "output"),
+        history,
+        "en-US",
+        "US",
+        _gui._default_advanced_settings(),
+    )
+    assert recognized == titles
+    assert saved_states[0] == saved_states[-1] == ""
+    assert saved_states[1] and saved_states[2] == saved_states[1]
+    assert frame.log_list.GetStrings() == ["Autor - Nowy"]
+    assert history.read_text(encoding="utf-8").splitlines() == ["Autor - Znany", "Autor - Nowy"]
+    assert len(dialogs) + spoken.call_count == 1

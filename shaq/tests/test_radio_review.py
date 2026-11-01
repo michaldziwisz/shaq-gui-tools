@@ -66,61 +66,73 @@ def test_missing_decoder_and_preview_errors_use_selected_language(
         _radio_playlist.validate_stream_url("file:///bad", translate=t)
 
 
-def test_reader_discovery_skips_denied_processes_and_closes_handles(
+@pytest.mark.parametrize("pointer_size", [4, 8])
+@pytest.mark.parametrize("variable", ["ProgramFiles", "ProgramFiles(x86)"])
+def test_zdsr_uses_only_installed_library_for_process_architecture(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    pointer_size: int,
+    variable: str,
 ) -> None:
-    ordinary = SimpleNamespace(Close=Mock(), path=tmp_path / "player.exe")
-    reader = SimpleNamespace(Close=Mock(), path=tmp_path / "reader" / "ZDSR.exe")
-    opener = Mock(side_effect=[OSError("Brak dostępu"), ordinary, reader])
-    monkeypatch.setitem(sys.modules, "pywintypes", SimpleNamespace(error=OSError))
-    monkeypatch.setitem(sys.modules, "win32api", SimpleNamespace(OpenProcess=opener))
-    monkeypatch.setitem(
-        sys.modules,
-        "win32process",
-        SimpleNamespace(
-            EnumProcesses=lambda: [1, 2, 3],
-            GetModuleFileNameEx=lambda handle, _module: str(handle.path),
-        ),
-    )
-    assert _zdsr_output._running_reader_directories() == [reader.path.parent]
-    ordinary.Close.assert_called_once()
-    reader.Close.assert_called_once()
-
-
-def test_reader_discovery_tolerates_missing_library_and_enumeration_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setitem(sys.modules, "win32api", None)
-    assert _zdsr_output._running_reader_directories() == []
-    monkeypatch.setitem(sys.modules, "pywintypes", SimpleNamespace(error=OSError))
-    monkeypatch.setitem(sys.modules, "win32api", SimpleNamespace())
-    monkeypatch.setitem(
-        sys.modules,
-        "win32process",
-        SimpleNamespace(
-            EnumProcesses=Mock(side_effect=OSError("Brak dostępu")),
-        ),
-    )
-    assert _zdsr_output._running_reader_directories() == []
-
-
-def test_installed_reader_library_prefers_running_reader_then_install_directory(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    filename = "ZDSRAPI_x64.dll" if ctypes.sizeof(ctypes.c_void_p) == 8 else "ZDSRAPI.dll"
-    active = tmp_path / "portable"
+    """Obcy proces o nazwie ZDSR i katalog roboczy nie wskazują biblioteki czytnika."""
     installed = tmp_path / "programs" / "zdsr" / "zdsr"
-    active.mkdir()
     installed.mkdir(parents=True)
-    (active / filename).write_bytes(b"test")
-    (installed / filename).write_bytes(b"test")
-    monkeypatch.setenv("ProgramFiles", str(tmp_path / "programs"))
-    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
-    monkeypatch.setattr(_zdsr_output, "_running_reader_directories", lambda: [active])
-    assert _zdsr_output._installed_library() == active / filename
-    monkeypatch.setattr(_zdsr_output, "_running_reader_directories", lambda: [])
+    for name in ("ZDSRAPI.dll", "ZDSRAPI_x64.dll"):
+        (installed / name).write_bytes(b"instalacja")
+        (tmp_path / name).write_bytes(b"obcy plik")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(
+        sys.modules,
+        "win32process",
+        SimpleNamespace(
+            EnumProcesses=Mock(side_effect=AssertionError("Nie należy przeglądać procesów.")),
+        ),
+    )
+    for name in ("ProgramFiles", "ProgramFiles(x86)"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(variable, str(tmp_path / "programs"))
+    monkeypatch.setattr(ctypes, "sizeof", lambda _: pointer_size)
+    filename = "ZDSRAPI_x64.dll" if pointer_size == 8 else "ZDSRAPI.dll"
     assert _zdsr_output._installed_library() == installed / filename
-    monkeypatch.delenv("ProgramFiles")
+
+
+@pytest.mark.parametrize("directory", [None, "relative/path", "missing"])
+def test_missing_or_invalid_zdsr_installation_uses_bundled_library(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    directory: str | None,
+) -> None:
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.delenv("ProgramFiles", raising=False)
+    if directory is not None:
+        monkeypatch.setenv(
+            "ProgramFiles", str(tmp_path / directory) if directory == "missing" else directory
+        )
+    library = SimpleNamespace(InitTTS=Mock(), GetSpeakState=Mock(), Speak=Mock())
+    factory = Mock(return_value=SimpleNamespace(lib=library))
+    loader = Mock(side_effect=AssertionError("Nie wolno ładować obcej biblioteki."))
+    monkeypatch.setattr(ctypes, "WinDLL", loader, raising=False)
+    output = _zdsr_output.create_output(factory)
+    assert output._library is library and not output._modern
+    factory.assert_called_once()
+    loader.assert_not_called()
+
+
+def test_zdsr_rejects_installation_link_outside_program_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Rozwiązany cel dowiązania musi pozostawać wewnątrz Program Files."""
+    root = tmp_path / "programs"
+    root.mkdir()
+    outside = tmp_path / "outside.dll"
+    outside.write_bytes(b"obcy plik")
+    original = Path.resolve
+    monkeypatch.setenv("ProgramFiles", str(root))
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.setattr(
+        Path,
+        "resolve",
+        lambda path, **kwargs: outside if path.suffix == ".dll" else original(path, **kwargs),
+    )
     assert _zdsr_output._installed_library() is None

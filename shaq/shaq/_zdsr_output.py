@@ -8,44 +8,21 @@ from pathlib import Path
 from typing import Any
 
 
-def _running_reader_directories() -> list[Path]:
-    try:
-        import pywintypes
-        import win32api
-        import win32process
-    except ImportError:
-        return []
-
-    directories: list[Path] = []
-    try:
-        processes = win32process.EnumProcesses()
-    except (OSError, pywintypes.error):
-        return directories
-    for pid in processes:
-        handle = None
-        try:
-            handle = win32api.OpenProcess(0x0400 | 0x0010, False, pid)
-            executable = Path(win32process.GetModuleFileNameEx(handle, 0))
-            if executable.stem.casefold().startswith("zdsr"):
-                directories.append(executable.parent)
-        except (OSError, pywintypes.error):
-            continue
-        finally:
-            if handle is not None:
-                handle.Close()
-    return directories
-
-
 def _installed_library() -> Path | None:
+    """Sprawdza wyłącznie katalog instalacji; nazwa procesu nie uprawnia do ładowania DLL."""
     filename = "ZDSRAPI_x64.dll" if ctypes.sizeof(ctypes.c_void_p) == 8 else "ZDSRAPI.dll"
-    directories = _running_reader_directories()
     for variable in ("ProgramFiles(x86)", "ProgramFiles"):
         directory = os.environ.get(variable)
-        if directory:
-            directories.append(Path(directory) / "zdsr" / "zdsr")
-    return next(
-        (folder / filename for folder in directories if (folder / filename).is_file()), None
-    )
+        if not directory or not Path(directory).is_absolute():
+            continue
+        try:
+            root = Path(directory).resolve()
+            candidate = (root / "zdsr" / "zdsr" / filename).resolve()
+            if candidate.is_relative_to(root) and candidate.is_file():
+                return candidate
+        except (OSError, RuntimeError):
+            continue
+    return None
 
 
 class ZdsrOutput:
@@ -84,7 +61,7 @@ class ZdsrOutput:
 
 
 def create_output(output_class: type[Any]) -> ZdsrOutput:
-    """Wybiera DLL bieżącego czytnika, a przy jej braku wersję z Accessible Output 2."""
+    """Wybiera DLL z instalacji w Program Files lub dołączoną wersję Accessible Output 2."""
     path = _installed_library()
     if path is not None:
         return ZdsrOutput(ctypes.WinDLL(str(path)), modern=True)

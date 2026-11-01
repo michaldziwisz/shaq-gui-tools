@@ -26,8 +26,12 @@ odczytywane ponownie. Zaznaczenie listy pozostaje bez zmian.
 
 Odczyt rozpoznania i zapis historii są osobnymi zdarzeniami. Lista zachowuje
 znaczenie **zapisanych, unikalnych wyników**; błąd zapisu pozostaje widoczny
-w statusie i nie zatrzymuje nasłuchu. Odczyt może przekazać również znany już
-utwór, którego nie dopisano ponownie do historii.
+w osobnym polu **Stan zapisu historii** i nie zatrzymuje nasłuchu. Jest
+ogłaszany raz na serię niepowodzeń niezależnie od opcji odczytu tytułów
+i fokusu; gdy przekazanie do czytnika się nie powiedzie, pojawia się dostępne
+okno ostrzeżenia. Zwykłe statusy i rozpoznanie znanego utworu nie kasują
+ostrzeżenia. Znika ono dopiero po rzeczywistym, udanym zapisie nowego wpisu.
+Odczyt tytułu może przekazać również utwór już obecny w historii.
 
 Informacje o łączeniu, rozpoczęciu nasłuchu, błędzie, odzyskaniu transmisji
 i zatrzymaniu są przekazywane do czytnika niezależnie od opcji odczytu tytułów.
@@ -42,8 +46,10 @@ Także awaria rozpoznawania ma osobny rodzaj zdarzenia.
   i ich metadanymi licencyjnymi dołączanymi przez PyInstaller.
 - NVDA i JAWS obsługiwane są przez Accessible Output 2. Dla ZDSR sprawdzane są
   wyniki wywołań API; preferowana jest biblioteka z zainstalowanego czytnika.
-  Wykrywanie ZDSR korzysta z pywin32, zależności Accessible Output 2, i nie
-  wymaga kodu nasłuchu procesu z innego PR-a.
+  Wyszukiwanie DLL obejmuje wyłącznie katalog instalacji ZDSR pod Program Files,
+  z kontrolą ścieżki po rozwiązaniu dowiązań. Nazwa uruchomionego procesu
+  nie służy do wskazywania biblioteki. Przy braku instalacji pozostaje wersja
+  dołączona do Accessible Output 2. Nie wymaga to kodu nasłuchu procesu.
 - Powiadomienia Windows UI Automation stanowią ścieżkę dla Narratora,
   gdy nie zostanie znaleziony aktywny czytnik obsługiwany przez bibliotekę.
 - FFmpeg jest dołączony do `shaqgui.exe`, tak jak wcześniej do ShaqFileGUI.
@@ -62,6 +68,8 @@ bez zmian; numer następnego wydania ustala opiekun projektu.
 Testy obejmują playlisty i błędne adresy, ograniczenia bufora, niezależność
 odsłuchu, głośność, zatrzymanie i ponowne łączenie, tłumaczenia PL/EN,
 ogłaszanie błędów i wznowienia, konfigurację oraz zachowanie fokusu.
+Obejmują także trwałość i jednokrotne ogłaszanie błędu zapisu, brak jego
+kasowania przez duplikaty oraz wybór DLL ZDSR wyłącznie z katalogu instalacji.
 Lokalny serwer sprawdza rzeczywiste dekodowanie MP3, AAC i HLS przez FFmpeg,
 HTTP 404, przerwaną transmisję, zawieszony odbiór i sprzątanie procesu dekodera.
 
