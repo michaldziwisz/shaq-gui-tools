@@ -678,7 +678,7 @@ def _main() -> None:
                 self._speakers = []
                 self._microphones = []
 
-            self._events: Queue[tuple[str, str]] = Queue()
+            self._events: Queue[tuple[str, str | tuple[str, str]]] = Queue()
             self._stop_event = threading.Event()
             self._worker: threading.Thread | None = None
             self._announcer = RecognitionAnnouncer()
@@ -1364,7 +1364,7 @@ def _main() -> None:
                         else None
                     )
                 try:
-                    copied = copy_text(text)
+                    copied = copy_text(text, int(self.log_list.GetHandle()))
                 except (TypeError, ValueError):
                     copied = False
                 if copied:

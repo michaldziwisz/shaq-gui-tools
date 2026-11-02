@@ -114,7 +114,9 @@ def test_copy_uses_metadata_preserves_selection_and_announces(window: Any, full:
     assert not frame._advanced.announce_recognitions
 
     event = press(window, ord("C"), shift=full)
-    window.copied.assert_called_once_with(display if full else title)
+    window.copied.assert_called_once_with(
+        display if full else title, int(frame.log_list.GetHandle())
+    )
     key = "clipboard.full_copied" if full else "clipboard.title_copied"
     expected = window.module._STRINGS[key][window.language]
     window.spoken.assert_called_once_with(expected, int(frame.log_list.GetHandle()))
