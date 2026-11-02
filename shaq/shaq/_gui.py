@@ -16,6 +16,7 @@ from typing import Any
 
 from shaq._i18n import I18n, UI_LANGUAGE_CHOICES, ui_language_from_config
 from shaq._announcements import RecognitionAnnouncer
+from shaq._clipboard import copy_text
 from shaq._file_scan import slice_wav_bytes
 from shaq._process_audio import ProcessTarget, record_process_wav
 from shaq._process_picker import ProcessPicker
@@ -69,6 +70,26 @@ _DEFAULT_SHAZAM_COUNTRY = os.environ.get("SHAQGUI_SHAZAM_COUNTRY", "US").strip()
 _CONFIG_VERSION = 1
 
 _STRINGS: dict[str, dict[str, str]] = {
+    "clipboard.shortcuts": {
+        "pl": "Ctrl+C: kopiuj tytuł. Ctrl+Shift+C: kopiuj wykonawców i tytuł.",
+        "en": "Ctrl+C: copy title. Ctrl+Shift+C: copy artists and title.",
+    },
+    "clipboard.title_copied": {
+        "pl": "Skopiowano tytuł do schowka.",
+        "en": "Title copied to the clipboard.",
+    },
+    "clipboard.full_copied": {
+        "pl": "Skopiowano wykonawców i tytuł do schowka.",
+        "en": "Artists and title copied to the clipboard.",
+    },
+    "clipboard.no_selection": {
+        "pl": "Brak zaznaczonego wyniku do skopiowania.",
+        "en": "No result is selected for copying.",
+    },
+    "clipboard.failed": {
+        "pl": "Nie udało się skopiować do schowka. Spróbuj ponownie.",
+        "en": "Could not copy to the clipboard. Please try again.",
+    },
     **PROCESS_STRINGS,
     "history.label": {"pl": "Stan zapisu historii:", "en": "History saving status:"},
     "history.no_error": {
@@ -791,6 +812,8 @@ def _main() -> None:
 
             self.log_list = wx.ListBox(panel)
             self.log_list.SetName(t("name.saved_recognitions"))
+            self.log_list.SetToolTip(t("clipboard.shortcuts"))
+            self.log_list.Bind(wx.EVT_KEY_DOWN, self._on_results_key_down)
             self._history_write_error = ""
             history_label = wx.StaticText(panel, label=t("history.label"))
             self.history_status = wx.TextCtrl(
@@ -1315,6 +1338,47 @@ def _main() -> None:
             self._radio.request_monitor_stop()
             self.SetStatusText(t("status.stopping"))
 
+        def _on_results_key_down(self, event: wx.KeyEvent) -> None:
+            """Obsługuje skróty kopiowania wyłącznie na liście wyników."""
+            modifiers = event.GetModifiers()
+            if event.GetKeyCode() == ord("C") and modifiers in (
+                wx.MOD_CONTROL,
+                wx.MOD_CONTROL | wx.MOD_SHIFT,
+            ):
+                self._copy_selected_result(include_artists=event.ShiftDown())
+            else:
+                event.Skip()
+
+        def _copy_selected_result(self, *, include_artists: bool) -> None:
+            """Kopiuje zaznaczony wynik i ogłasza rezultat bez zmiany zaznaczenia."""
+            selection = self.log_list.GetSelection()
+            copied = False
+            message_key = "clipboard.no_selection"
+            if selection != wx.NOT_FOUND:
+                if include_artists:
+                    text = self.log_list.GetString(selection)
+                else:
+                    text = (
+                        self.log_list.GetClientData(selection)
+                        if self.log_list.HasClientData()
+                        else None
+                    )
+                try:
+                    copied = copy_text(text)
+                except (TypeError, ValueError):
+                    copied = False
+                if copied:
+                    message_key = (
+                        "clipboard.full_copied" if include_artists else "clipboard.title_copied"
+                    )
+                else:
+                    message_key = "clipboard.failed"
+            message = t(message_key)
+            self.SetStatusText(message)
+            if not self._announcer.speaker.speak(message, int(self.log_list.GetHandle())):
+                icon = wx.ICON_INFORMATION if copied else wx.ICON_WARNING
+                wx.MessageBox(message, _APP_NAME, wx.OK | icon, self)
+
         def _worker_main(
             self,
             device: _AudioDevice | ProcessTarget | RadioStream,
@@ -1459,7 +1523,7 @@ def _main() -> None:
                     self._events.put(("status", t("status.recognized", track=line)))
                     try:
                         if writer.append_unique(line):
-                            self._events.put(("track", line))
+                            self._events.put(("track", (line, track.track.title)))
                             self._events.put(("status", t("status.saved")))
                     except OSError as exc:
                         self._events.put(("write_warning", t("error.write_file", error=str(exc))))
@@ -1520,7 +1584,8 @@ def _main() -> None:
                     )
                 elif kind == "track":
                     self._history_write_succeeded()
-                    self.log_list.Append(payload)
+                    line, title = payload
+                    self.log_list.Append(line, title)
                 elif kind == "error":
                     self.SetStatusText(t("status.error"))
                     if self.source_choice.GetSelection() == 3:

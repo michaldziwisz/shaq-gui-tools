@@ -12,6 +12,15 @@
 - `shaqfilegui` — skanowanie **wielu plików** (albo całego folderu) przez próbkowanie co N sekund → zapis wyników do `.txt`.
 - `shaqcast` — nasłuch z wybranego urządzenia → rozpoznanie → aktualizacja “Now Playing” w Shoutcast (SIDy) lub Icecast (mounty).
 
+**Kopiowanie wyników (ShaqGUI):**
+
+Na liście zapisanych rozpoznań w `shaqgui` **Ctrl+C** kopiuje sam tytuł
+zaznaczonego utworu, a **Ctrl+Shift+C** kopiuje wykonawców i tytuł.
+Czytnik ekranu oznajmia wynik działania, również przy wyłączonym automatycznym
+odczycie rozpoznań. Brak zaznaczenia lub błąd schowka daje osobny komunikat.
+Skróty działają tylko na tej liście; tytuł pochodzi z danych rozpoznania,
+więc myślniki w nazwach wykonawców i utworów pozostają zachowane.
+
 **Konfiguracja (zapamiętywanie ustawień):**
 
 - `shaqgui`: `%APPDATA%\\shaqgui\\config.json`
@@ -45,6 +54,15 @@ Uwaga: do budowania `shaqgui.exe` potrzebny jest `ffmpeg.exe`, a do `shaqfilegui
 - `shaqgui` — listen from **Output (loopback)** or **Input (microphone)** → recognize → append to a history file.
 - `shaqfilegui` — scan **multiple files** (or a whole folder) by sampling every N seconds → write results to `.txt`.
 - `shaqcast` — listen from a selected device → recognize → update Shoutcast “Now Playing” (one or more SIDs) or Icecast (mounts).
+
+**Copying results (ShaqGUI):**
+
+In the `shaqgui` saved results list, **Ctrl+C** copies the selected song title,
+and **Ctrl+Shift+C** copies its artists and title. The screen reader announces
+the outcome even when automatic recognition announcements are disabled.
+An empty selection or a clipboard error produces a separate message.
+These shortcuts only apply to the results list. The title comes from recognition
+metadata, preserving hyphens in artist names and song titles.
 
 **Config (settings persistence):**
 

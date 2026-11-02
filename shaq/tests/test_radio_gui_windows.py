@@ -421,7 +421,7 @@ def test_recognition_speaks_only_on_active_list_and_keeps_selection(
     )
     frame.log_list.Append("Starszy wynik")
     frame.log_list.SetSelection(0)
-    frame._events.put(("track", "Wykonawca - Utwór"))
+    frame._events.put(("track", ("Wykonawca - Utwór", "Utwór")))
     for _repeat in range(3):
         frame._events.put(("recognition", "Wykonawca - Utwór"))
     frame._on_timer(None)
@@ -588,7 +588,7 @@ def test_history_warning_survives_status_updates_until_successful_save(
     assert spoken.call_count == int(has_speaker)
     assert len(dialogs) == int(not has_speaker or not speaker_available)
 
-    frame._events.put(("track", "Nowy zapisany utwór"))
+    frame._events.put(("track", ("Nowy zapisany utwór", "Nowy zapisany utwór")))
     frame._on_timer(None)
     assert not frame._history_write_error
     assert ("ponownie działa" if language == "pl" else "working again") in (

@@ -237,6 +237,7 @@ def test_write_failure_keeps_monitoring_and_list_contains_only_saved_unique_trac
     assert not any(kind == "error" for kind, _payload in events)
     frame._on_timer(None)
     assert frame.log_list.GetStrings() == ["Wykonawca - Drugi", "Wykonawca - Pierwszy"]
+    assert [frame.log_list.GetClientData(i) for i in range(2)] == ["Drugi", "Pierwszy"]
     assert history.read_text(encoding="utf-8").splitlines() == frame.log_list.GetStrings()
     assert len(dialogs) == 1
     assert frame.history_status.GetValue() in _gui._STRINGS["history.restored"].values()
@@ -503,7 +504,7 @@ def test_history_warning_survives_status_updates_until_successful_save(
     assert spoken.call_count == int(has_speaker)
     assert len(dialogs) == int(not has_speaker or not speaker_available)
 
-    frame._events.put(("track", "Nowy zapisany utwór"))
+    frame._events.put(("track", ("Nowy zapisany utwór", "Nowy zapisany utwór")))
     frame._on_timer(None)
     assert not frame._history_write_error
     assert ("ponownie działa" if language == "pl" else "working again") in (
