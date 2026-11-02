@@ -81,7 +81,7 @@ def _hidden_frame(module: Any, wx: Any, app: Any, monkeypatch: pytest.MonkeyPatc
     )
 
 
-@pytest.mark.parametrize("source", ["output", "input"])
+@pytest.mark.parametrize("source", ["output", "input", "process", "radio"])
 @pytest.mark.parametrize("language", ["pl", "en"])
 def test_live_recognition_reports_existing_history_in_every_source(
     gui_environment: tuple[Any, Any, list[str]],
@@ -90,6 +90,7 @@ def test_live_recognition_reports_existing_history_in_every_source(
     source: str,
     language: str,
 ) -> None:
+    """Znany utwór trafia raz na listę, zachowuje tytuł do kopiowania i nie dubluje pliku."""
     from shazamio import Serialize
 
     from shaq import _gui
@@ -128,17 +129,44 @@ def test_live_recognition_reports_existing_history_in_every_source(
             matches=[True], track=SimpleNamespace(subtitle="Wykonawca", title="Utwór")
         ),
     )
-    device = _gui._AudioDevice("Test", "test", source)
+    if source == "process":
+        device = _gui.ProcessTarget(r"C:\test\player.exe")
+        monkeypatch.setattr(_gui, "record_process_wav", record)
+    elif source == "radio":
+        device = object.__new__(_gui.RadioStream)
+        monkeypatch.setattr(_gui.RadioStream, "read_wav", record)
+    else:
+        device = _gui._AudioDevice("Test", "test", source)
     advanced = _gui._AdvancedSettings(15, 60, 2, 1, -55)
     frame._worker_main(device, history, "en-US", "US", advanced)
     events = list(frame._events.queue)
-    assert [payload for kind, payload in events if kind == "track"] == []
+    assert not any(kind == "history_saved" for kind, _payload in events)
     label = "Ostatnie rozpoznanie" if language == "pl" else "Last recognition"
     assert any(label in payload for kind, payload in events if kind == "status")
     assert not any(kind == "error" for kind, _payload in events)
     frame._on_timer(None)
-    assert frame.log_list.GetCount() == 0
+    assert frame.log_list.GetStrings() == [line]
+    assert frame.log_list.GetClientData(0) == "Utwór"
+    assert frame.log_list.GetName() == (
+        "Rozpoznania z bieżącego uruchomienia" if language == "pl" else "Recognitions from this run"
+    )
+    assert frame.history_status.GetValue() == _gui._STRINGS["history.no_error"][language]
     assert history.read_text(encoding="utf-8") == line + "\n"
+
+    # Stop/Start w tym samym oknie nie powinien dodać kolejnego wiersza.
+    frame._stop_event.clear()
+    recognized.clear()
+    frame._worker_main(device, history, "en-US", "US", advanced)
+    frame._on_timer(None)
+    assert frame.log_list.GetStrings() == [line]
+    assert history.read_text(encoding="utf-8") == line + "\n"
+
+    # Po ponownym uruchomieniu lista zaczyna od nowa i przyjmuje znane rozpoznanie.
+    restarted = _hidden_frame(_gui, wx, app, monkeypatch)
+    assert restarted.log_list.GetCount() == 0
+    restarted._events.put(("recognition", (line, "Utwór")))
+    restarted._on_timer(None)
+    assert restarted.log_list.GetStrings() == [line]
 
 
 def test_live_stop_cancels_recognition_without_error_dialog(
@@ -177,12 +205,12 @@ def test_live_stop_cancels_recognition_without_error_dialog(
     assert not dialogs
 
 
-def test_write_failure_keeps_monitoring_and_list_contains_only_saved_unique_tracks(
+def test_write_failure_keeps_recognitions_visible_and_history_contains_only_saved_tracks(
     gui_environment: tuple[Any, Any, list[str]],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Awaria zapisu nie kończy nasłuchu ani nie dodaje fałszywie zapisanego wyniku."""
+    """Awaria zapisu nie ukrywa rozpoznania; lista i plik zachowują własną kolejność."""
     from shazamio import Serialize
 
     from shaq import _gui
@@ -236,8 +264,11 @@ def test_write_failure_keeps_monitoring_and_list_contains_only_saved_unique_trac
     assert sum(kind == "write_warning" for kind, _payload in events) == 1
     assert not any(kind == "error" for kind, _payload in events)
     frame._on_timer(None)
-    assert frame.log_list.GetStrings() == ["Wykonawca - Drugi", "Wykonawca - Pierwszy"]
-    assert history.read_text(encoding="utf-8").splitlines() == frame.log_list.GetStrings()
+    assert frame.log_list.GetStrings() == ["Wykonawca - Pierwszy", "Wykonawca - Drugi"]
+    assert [frame.log_list.GetClientData(i) for i in range(2)] == ["Pierwszy", "Drugi"]
+    assert history.read_text(encoding="utf-8").splitlines() == [
+        "Wykonawca - Drugi", "Wykonawca - Pierwszy"
+    ]
     assert len(dialogs) == 1
     assert frame.history_status.GetValue() in _gui._STRINGS["history.restored"].values()
 
@@ -503,7 +534,7 @@ def test_history_warning_survives_status_updates_until_successful_save(
     assert spoken.call_count == int(has_speaker)
     assert len(dialogs) == int(not has_speaker or not speaker_available)
 
-    frame._events.put(("track", "Nowy zapisany utwór"))
+    frame._events.put(("history_saved", ""))
     frame._on_timer(None)
     assert not frame._history_write_error
     assert ("ponownie działa" if language == "pl" else "working again") in (
@@ -590,7 +621,7 @@ def test_history_warning_keeps_worker_running_and_duplicate_does_not_clear_it(
     assert recognized == titles
     assert saved_states[0] == saved_states[-1] == ""
     assert saved_states[1] and saved_states[2] == saved_states[1]
-    assert frame.log_list.GetStrings() == ["Autor - Nowy"]
+    assert frame.log_list.GetStrings() == ["Autor - Nowy", "Autor - Znany"]
     assert history.read_text(encoding="utf-8").splitlines() == ["Autor - Znany", "Autor - Nowy"]
     assert len(dialogs) + spoken.call_count == 1
 
