@@ -14,7 +14,11 @@
 
 **Kopiowanie wyników (ShaqGUI):**
 
-Na liście zapisanych rozpoznań w `shaqgui` **Ctrl+C** kopiuje sam tytuł
+Lista w `shaqgui` pokazuje każdy utwór rozpoznany podczas bieżącego uruchomienia
+tylko raz, również gdy jest on już w historii. Stop/Start nie czyści listy.
+Plik historii nadal pomija duplikaty; błąd jego zapisu pozostaje widoczny
+w osobnym polu „Stan zapisu historii” i nie ukrywa rozpoznanego utworu.
+Na tej liście **Ctrl+C** kopiuje sam tytuł
 zaznaczonego utworu, a **Ctrl+Shift+C** kopiuje wykonawców i tytuł.
 Czytnik ekranu oznajmia wynik działania, również przy wyłączonym automatycznym
 odczycie rozpoznań. Brak zaznaczenia lub błąd schowka daje osobny komunikat.
@@ -57,7 +61,11 @@ Uwaga: do budowania `shaqgui.exe` potrzebny jest `ffmpeg.exe`, a do `shaqfilegui
 
 **Copying results (ShaqGUI):**
 
-In the `shaqgui` saved results list, **Ctrl+C** copies the selected song title,
+The `shaqgui` results list shows each track recognized during the current run
+once, including tracks already in the history file. Stop/Start keeps the list.
+The history file still excludes duplicates. A write failure remains visible
+in the separate history status field without hiding the recognized track.
+In this list, **Ctrl+C** copies the selected song title,
 and **Ctrl+Shift+C** copies its artists and title. The screen reader announces
 the outcome even when automatic recognition announcements are disabled.
 An empty selection or a clipboard error produces a separate message.

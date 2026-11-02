@@ -204,10 +204,13 @@ _STRINGS: dict[str, dict[str, str]] = {
         "pl": "Wybierz plik, do którego będą zapisywane rozpoznania.",
         "en": "Choose the file where recognitions will be written.",
     },
-    "name.saved_recognitions": {"pl": "Zapisane rozpoznania", "en": "Saved recognitions"},
-    "label.saved_unique": {
-        "pl": "Zapisane rozpoznania (unikalne):",
-        "en": "Saved recognitions (unique):",
+    "name.session_recognitions": {
+        "pl": "Rozpoznania z bieżącego uruchomienia",
+        "en": "Recognitions from this run",
+    },
+    "label.session_recognitions": {
+        "pl": "Rozpoznania z bieżącego uruchomienia (unikalne):",
+        "en": "Recognitions from this run (unique):",
     },
     "button.advanced": {"pl": "Ustawienia zaawansowane…", "en": "Advanced settings..."},
     "tooltip.advanced": {
@@ -811,7 +814,8 @@ def _main() -> None:
             self.browse_btn.Bind(wx.EVT_BUTTON, self._on_browse)
 
             self.log_list = wx.ListBox(panel)
-            self.log_list.SetName(t("name.saved_recognitions"))
+            self._listed_recognitions: set[str] = set()
+            self.log_list.SetName(t("name.session_recognitions"))
             self.log_list.SetToolTip(t("clipboard.shortcuts"))
             self.log_list.Bind(wx.EVT_KEY_DOWN, self._on_results_key_down)
             self._history_write_error = ""
@@ -874,7 +878,7 @@ def _main() -> None:
             layout.Add(grid, 0, wx.EXPAND | wx.ALL, 12)
             layout.Add(self._radio.panel, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
             layout.Add(
-                wx.StaticText(panel, label=t("label.saved_unique")),
+                wx.StaticText(panel, label=t("label.session_recognitions")),
                 0,
                 wx.LEFT | wx.RIGHT,
                 12,
@@ -1059,11 +1063,11 @@ def _main() -> None:
                 }
 
             def _log_payload() -> dict[str, Any]:
-                saved = [self.log_list.GetString(i) for i in range(self.log_list.GetCount())]
+                recognized = self.log_list.GetStrings()
                 return {
                     "app": {"id": _APP_NAME, "version": app_version},
                     "config": self._collect_config(),
-                    "saved_recognitions": saved,
+                    "session_recognitions": recognized,
                 }
 
             if _sygnalista_gui is None:
@@ -1518,12 +1522,12 @@ def _main() -> None:
 
                     consecutive_recognition_errors = 0
                     line = f"{track.track.subtitle} - {track.track.title}"
-                    self._events.put(("recognition", line))
+                    self._events.put(("recognition", (line, track.track.title)))
                     last_recognized = line
                     self._events.put(("status", t("status.recognized", track=line)))
                     try:
                         if writer.append_unique(line):
-                            self._events.put(("track", (line, track.track.title)))
+                            self._events.put(("history_saved", ""))
                             self._events.put(("status", t("status.saved")))
                     except OSError as exc:
                         self._events.put(("write_warning", t("error.write_file", error=str(exc))))
@@ -1575,17 +1579,19 @@ def _main() -> None:
                 elif kind == "radio_recognition_ok":
                     self._radio.recognition_succeeded()
                 elif kind == "recognition":
+                    line, title = payload
+                    if line not in self._listed_recognitions:
+                        self.log_list.Append(line, title)
+                        self._listed_recognitions.add(line)
                     self._radio.recognition_succeeded()
                     self._announcer.announce(
-                        payload,
+                        line,
                         enabled=self._advanced.announce_recognitions,
                         list_focused=self.IsActive() and wx.Window.FindFocus() == self.log_list,
                         hwnd=int(self.log_list.GetHandle()),
                     )
-                elif kind == "track":
+                elif kind == "history_saved":
                     self._history_write_succeeded()
-                    line, title = payload
-                    self.log_list.Append(line, title)
                 elif kind == "error":
                     self.SetStatusText(t("status.error"))
                     if self.source_choice.GetSelection() == 3:

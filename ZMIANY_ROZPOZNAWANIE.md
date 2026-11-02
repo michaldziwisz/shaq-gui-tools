@@ -36,9 +36,11 @@ górnego limitu do 30 s: brak pomiaru, który uzasadniałby większą częstotli
 zapytań podczas długiego dławienia usługi. Jawna kontrola pozostaje, bez
 wielokrotnych, ukrytych zapytań biblioteki.
 
-Lista ShaqGUI ponownie pokazuje tylko **unikalne wpisy rzeczywiście zapisane**
-do historii, zgodnie z etykietą. Rozpoznanie znanego utworu jest widoczne w
-statusie „Rozpoznano” i „Ostatnie rozpoznanie”; nie oznacza ponownego zapisu.
+Lista ShaqGUI pokazuje **unikalne rozpoznania z bieżącego uruchomienia**,
+również gdy utwór znajduje się już w pliku historii. Stop/Start zachowuje listę,
+a ponowne uruchomienie programu rozpoczyna nową listę. Rozpoznanie znanego
+utworu nie oznacza ponownego zapisu do pliku. Wynik pozostaje na liście także
+po błędzie zapisu, a etykieta listy i raport diagnostyczny opisują rozpoznania.
 Błąd zapisu pozostaje widoczny w osobnym, dostępnym polu **Stan zapisu historii**.
 Pierwszy błąd danej serii wyświetla dostępne okno ostrzeżenia; wątek nasłuchu
 pracuje dalej. Zwykłe statusy, Stop/Start i rozpoznanie znanego utworu nie kasują

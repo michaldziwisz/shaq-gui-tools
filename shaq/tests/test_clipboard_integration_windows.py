@@ -138,7 +138,7 @@ def _probe() -> int:
         frame._announcer.speaker = SimpleNamespace(speak=spoken)
         title = "Tytuł - część druga 🎵"
         full = f"Żółć feat. 東京 - {title}"
-        frame._events.put(("track", (full, title)))
+        frame._events.put(("recognition", (full, title)))
         frame._on_timer(None)
         frame.log_list.SetSelection(0)
         for shift, expected, key in (

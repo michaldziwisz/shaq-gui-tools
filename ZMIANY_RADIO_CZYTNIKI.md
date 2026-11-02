@@ -24,8 +24,9 @@ oraz przycisk testowy. Wykonawca i tytuł są odczytywani tylko przy fokusie
 na liście w aktywnym oknie. Kolejne dopasowania tego samego utworu nie są
 odczytywane ponownie. Zaznaczenie listy pozostaje bez zmian.
 
-Odczyt rozpoznania i zapis historii są osobnymi zdarzeniami. Lista zachowuje
-znaczenie **zapisanych, unikalnych wyników**; błąd zapisu pozostaje widoczny
+Odczyt rozpoznania i zapis historii są osobnymi zdarzeniami. Lista pokazuje
+**unikalne rozpoznania z bieżącego uruchomienia**, także utwory już obecne
+w historii. Zapis do pliku nadal pomija duplikaty. Błąd zapisu pozostaje widoczny
 w osobnym polu **Stan zapisu historii** i nie zatrzymuje nasłuchu. Jest
 ogłaszany raz na serię niepowodzeń niezależnie od opcji odczytu tytułów
 i fokusu; gdy przekazanie do czytnika się nie powiedzie, pojawia się dostępne

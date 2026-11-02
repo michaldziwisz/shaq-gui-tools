@@ -421,9 +421,8 @@ def test_recognition_speaks_only_on_active_list_and_keeps_selection(
     )
     frame.log_list.Append("Starszy wynik")
     frame.log_list.SetSelection(0)
-    frame._events.put(("track", ("Wykonawca - Utwór", "Utwór")))
     for _repeat in range(3):
-        frame._events.put(("recognition", "Wykonawca - Utwór"))
+        frame._events.put(("recognition", ("Wykonawca - Utwór", "Utwór")))
     frame._on_timer(None)
     assert frame.log_list.GetCount() == 2
     assert frame.log_list.GetSelection() == 0
@@ -588,7 +587,7 @@ def test_history_warning_survives_status_updates_until_successful_save(
     assert spoken.call_count == int(has_speaker)
     assert len(dialogs) == int(not has_speaker or not speaker_available)
 
-    frame._events.put(("track", ("Nowy zapisany utwór", "Nowy zapisany utwór")))
+    frame._events.put(("history_saved", ""))
     frame._on_timer(None)
     assert not frame._history_write_error
     assert ("ponownie działa" if language == "pl" else "working again") in (
@@ -675,6 +674,6 @@ def test_history_warning_keeps_worker_running_and_duplicate_does_not_clear_it(
     assert recognized == titles
     assert saved_states[0] == saved_states[-1] == ""
     assert saved_states[1] and saved_states[2] == saved_states[1]
-    assert frame.log_list.GetStrings() == ["Autor - Nowy"]
+    assert frame.log_list.GetStrings() == ["Autor - Nowy", "Autor - Znany"]
     assert history.read_text(encoding="utf-8").splitlines() == ["Autor - Znany", "Autor - Nowy"]
     assert len(dialogs) + spoken.call_count == 1

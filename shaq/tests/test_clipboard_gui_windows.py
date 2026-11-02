@@ -104,12 +104,12 @@ def test_copy_uses_metadata_preserves_selection_and_announces(window: Any, full:
     artist = "Artysta - Gość feat. Żółć & 東京"
     title = "Tytuł - część druga — na żywo 🎵"
     display = f"{artist} - {title}"
-    frame._events.put(("track", (display, title)))
+    frame._events.put(("recognition", (display, title)))
     frame._on_timer(None)
     frame.log_list.SetSelection(0)
     frame.log_list.SetFocus()
     initial_focus = window.wx.Window.FindFocus()
-    frame._events.put(("track", ("Ktoś - Nowszy utwór", "Nowszy utwór")))
+    frame._events.put(("recognition", ("Ktoś - Nowszy utwór", "Nowszy utwór")))
     frame._on_timer(None)
     assert not frame._advanced.announce_recognitions
 
